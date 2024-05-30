@@ -88,14 +88,16 @@ def merge_coco_datasets(coco_data1, coco_data2):
     annotation_key_map = {}
     current_annotation_id = 1
     for annotation in annotations1 + annotations2:
-        annotation_key = (annotation['image_id'], tuple(annotation['bbox']))
-        if annotation_key not in annotation_key_map:
-            annotation_key_map[annotation_key] = current_annotation_id
-            new_annotation = annotation.copy()
-            new_annotation['id'] = current_annotation_id
-            new_annotation['image_id'] = image_key_map[(annotation['image_id'],)]
-            merged_annotations.append(new_annotation)
-            current_annotation_id += 1
+        image_key = next((k for k, v in image_key_map.items() if v == annotation['image_id']), None)
+        if image_key is not None:
+            annotation_key = (image_key_map[image_key], tuple(annotation['bbox']))
+            if annotation_key not in annotation_key_map:
+                annotation_key_map[annotation_key] = current_annotation_id
+                new_annotation = annotation.copy()
+                new_annotation['id'] = current_annotation_id
+                new_annotation['image_id'] = image_key_map[image_key]
+                merged_annotations.append(new_annotation)
+                current_annotation_id += 1
 
     # 创建合并后的COCO数据集
     merged_coco_data = {
