@@ -46,47 +46,37 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 import os
-import random
 import shutil
 
-def copy_random_images_with_specific(src_dir, dest_dir, num_images=100, specific_image_name=None):
+def copy_matching_files(src_dir_a, src_dir_b, dest_dir_c):
     """
-    Copy a specified number of random images from the source directory to the destination directory,
-    and optionally include a specific image by its name.
+    Copy files from source directory A to destination directory C if they have the same name as files in source directory B.
 
     Parameters:
-    src_dir (str): The source directory containing images.
-    dest_dir (str): The destination directory to copy images to.
-    num_images (int): The number of random images to copy. Default is 100.
-    specific_image_name (str): The specific image name to include. Default is None.
+    src_dir_a (str): The source directory A containing files to be checked and copied.
+    src_dir_b (str): The source directory B containing files to match.
+    dest_dir_c (str): The destination directory C to copy matched files to.
     """
-    # Get list of all files in the source directory
-    all_files = [f for f in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, f))]
+    # Get list of files in both source directories
+    files_a = set(os.listdir(src_dir_a))
+    files_b = set(os.listdir(src_dir_b))
+
+    # Find the intersection of the two sets (files with the same name in both directories)
+    matching_files = files_a.intersection(files_b)
 
     # Ensure the destination directory exists
-    os.makedirs(dest_dir, exist_ok=True)
+    os.makedirs(dest_dir_c, exist_ok=True)
 
-    # If a specific image name is provided and exists in the source directory, include it
-    if specific_image_name and specific_image_name in all_files:
-        selected_files = [specific_image_name]
-        all_files.remove(specific_image_name)
-        num_images -= 1
-    else:
-        selected_files = []
-
-    # Select random files to copy
-    selected_files += random.sample(all_files, num_images)
-
-    # Copy selected files to the destination directory
-    for file in selected_files:
-        src_path = os.path.join(src_dir, file)
-        dest_path = os.path.join(dest_dir, file)
+    # Copy matching files from source directory A to destination directory C
+    for file in matching_files:
+        src_path = os.path.join(src_dir_a, file)
+        dest_path = os.path.join(dest_dir_c, file)
         shutil.copy(src_path, dest_path)
 
-    print(f"Copied {len(selected_files)} images from {src_dir} to {dest_dir}")
+    print(f"Copied {len(matching_files)} matching files from {src_dir_a} to {dest_dir_c}")
 
 # Example usage:
-source_directory = 'path_to_source_directory'
-destination_directory = 'path_to_destination_directory'
-specific_image = 'specific_image_name.jpg'
-copy_random_images_with_specific(source_directory, destination_directory, num_images=100, specific_image_name=specific_image)
+source_directory_a = 'path_to_source_directory_a'
+source_directory_b = 'path_to_source_directory_b'
+destination_directory_c = 'path_to_destination_directory_c'
+copy_matching_files(source_directory_a, source_directory_b, destination_directory_c)
