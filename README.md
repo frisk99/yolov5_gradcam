@@ -45,66 +45,85 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
-import json
 import os
+import json
 
-def is_intersecting(bbox1, bbox2):
-    """
-    检查两个边界框是否相交
-    bbox: [x, y, width, height]
-    """
-    x1_min, y1_min, w1, h1 = bbox1
-    x1_max, y1_max = x1_min + w1, y1_min + h1
+def yolo_to_coco(yolo_dir, image_dir, output_file):
+    # 初始化COCO格式的字典
+    coco_data = {
+        "images": [],
+        "annotations": [],
+        "categories": []
+    }
     
-    x2_min, y2_min, w2, h2 = bbox2
-    x2_max, y2_max = x2_min + w2, y2_min + h2
+    # 添加类别
+    for i in range(1, 81):  # YOLO类从0开始，COCO类从1开始
+        coco_data["categories"].append({
+            "id": i,
+            "name": f"class_{i}"
+        })
+    # 添加第81类
+    coco_data["categories"].append({
+        "id": 81,
+        "name": "class_81"
+    })
 
-    intersect = not (x1_min > x2_max or x1_max < x2_min or y1_min > y2_max or y1_max < y2_min)
-    return intersect
-
-# 定义路径
-data_dir = 'path/to/coco'
-data_type = 'val2017'
-ann_file = os.path.join(data_dir, 'annotations', f'instances_{data_type}.json')
-
-# 读取JSON文件
-with open(ann_file, 'r') as f:
-    coco_data = json.load(f)
-
-# 获取类别id
-person_category_id = next(cat['id'] for cat in coco_data['categories'] if cat['name'] == 'person')
-specific_category_id = next(cat['id'] for cat in coco_data['categories'] if cat['name'] == 'toaster')  # 替换为具体类别名称
-
-# 初始化要移除的标注列表
-annotations_to_remove = []
-
-# 遍历所有图像
-for img in coco_data['images']:
-    img_id = img['id']
-    annotations = [ann for ann in coco_data['annotations'] if ann['image_id'] == img_id]
+    annotation_id = 1
+    for idx, filename in enumerate(os.listdir(yolo_dir)):
+        if filename.endswith(".txt"):
+            image_id = idx + 1
+            image_filename = filename.replace(".txt", ".jpg")
+            image_path = os.path.join(image_dir, image_filename)
+            
+            # 获取图像尺寸
+            from PIL import Image
+            image = Image.open(image_path)
+            width, height = image.size
+            
+            # 添加图像信息到COCO数据中
+            coco_data["images"].append({
+                "id": image_id,
+                "file_name": image_filename,
+                "width": width,
+                "height": height
+            })
+            
+            # 读取YOLO标签文件
+            yolo_file_path = os.path.join(yolo_dir, filename)
+            with open(yolo_file_path, "r") as f:
+                for line in f.readlines():
+                    parts = line.strip().split()
+                    class_id = int(parts[0])
+                    x_center, y_center, bbox_width, bbox_height = map(float, parts[1:])
+                    
+                    # 转换坐标
+                    x_min = (x_center - bbox_width / 2) * width
+                    y_min = (y_center - bbox_height / 2) * height
+                    bbox_width *= width
+                    bbox_height *= height
+                    
+                    # 修改第0类为第81类
+                    if class_id == 0:
+                        class_id = 81
+                    
+                    # 添加标注信息到COCO数据中
+                    coco_data["annotations"].append({
+                        "id": annotation_id,
+                        "image_id": image_id,
+                        "category_id": class_id,
+                        "bbox": [x_min, y_min, bbox_width, bbox_height],
+                        "area": bbox_width * bbox_height,
+                        "iscrowd": 0
+                    })
+                    annotation_id += 1
     
-    person_annotations = [ann for ann in annotations if ann['category_id'] == person_category_id]
-    specific_annotations = [ann for ann in annotations if ann['category_id'] == specific_category_id]
+    # 保存COCO格式的JSON文件
+    with open(output_file, "w") as f:
+        json.dump(coco_data, f, indent=4)
 
-    for specific_ann in specific_annotations:
-        specific_bbox = specific_ann['bbox']
-        has_intersection = False
+# 使用示例
+yolo_dir = "path/to/yolo/labels"  # 替换为YOLO标签文件的路径
+image_dir = "path/to/images"  # 替换为图像文件的路径
+output_file = "path/to/output/coco_annotations.json"  # 替换为输出COCO文件的路径
 
-        for person_ann in person_annotations:
-            person_bbox = person_ann['bbox']
-            if is_intersecting(specific_bbox, person_bbox):
-                has_intersection = True
-                break
-
-        if not has_intersection:
-            annotations_to_remove.append(specific_ann['id'])
-
-# 移除不符合条件的标注
-coco_data['annotations'] = [ann for ann in coco_data['annotations'] if ann['id'] not in annotations_to_remove]
-
-# 保存修改后的注释文件
-output_file = os.path.join(data_dir, 'annotations', f'instances_{data_type}_filtered.json')
-with open(output_file, 'w') as f:
-    json.dump(coco_data, f)
-
-print(f"Filtered annotations saved to {output_file}")
+yolo_to_coco(yolo_dir, image_dir, output_file)
