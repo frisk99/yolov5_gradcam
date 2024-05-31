@@ -46,64 +46,47 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 import os
-import cv2
-import json
 import random
-import matplotlib.pyplot as plt
-from pycocotools.coco import COCO
+import shutil
 
-def visualize_and_save_coco_annotations(image_dir, annotation_file, output_dir):
-    # Ensure the output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Load COCO annotations
-    coco = COCO(annotation_file)
-    
-    # Get all image ids
-    image_ids = coco.getImgIds()
-    
-    for img_id in image_ids:
-        img_info = coco.loadImgs(img_id)[0]
-        img_path = os.path.join(image_dir, img_info['file_name'])
-        
-        # Check if the image file exists
-        if not os.path.exists(img_path):
-            print(f"Image file {img_info['file_name']} does not exist, skipping...")
-            continue
-        
-        # Read the image
-        image = cv2.imread(img_path)
-        if image is None:
-            print(f"Failed to read image file {img_info['file_name']}, skipping...")
-            continue
-        
-        # Get all annotations for the image
-        ann_ids = coco.getAnnIds(imgIds=img_id)
-        anns = coco.loadAnns(ann_ids)
-        
-        for ann in anns:
-            bbox = ann['bbox']
-            category_id = ann['category_id']
-            category_name = coco.loadCats(category_id)[0]['name']
-            
-            # Draw bounding box
-            x, y, w, h = map(int, bbox)
-            cv2.rectangle(image, (x, y), (x + w, y + h), (255, 0, 0), 2)
-            
-            # Put category name
-            cv2.putText(image, category_name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
-        
-        # Save the visualized image
-        output_path = os.path.join(output_dir, img_info['file_name'])
-        cv2.imwrite(output_path, image)
+def copy_random_images_with_specific(src_dir, dest_dir, num_images=100, specific_image_name=None):
+    """
+    Copy a specified number of random images from the source directory to the destination directory,
+    and optionally include a specific image by its name.
 
-        # Optional: Display the image using matplotlib
-        # plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-        # plt.show()
+    Parameters:
+    src_dir (str): The source directory containing images.
+    dest_dir (str): The destination directory to copy images to.
+    num_images (int): The number of random images to copy. Default is 100.
+    specific_image_name (str): The specific image name to include. Default is None.
+    """
+    # Get list of all files in the source directory
+    all_files = [f for f in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, f))]
 
-# Example usage
-image_directory = 'path_to_your_coco_images'
-annotation_file_path = 'path_to_your_coco_annotations.json'
-output_directory = 'path_to_save_visualized_images'
+    # Ensure the destination directory exists
+    os.makedirs(dest_dir, exist_ok=True)
 
-visualize_and_save_coco_annotations(image_directory, annotation_file_path, output_directory)
+    # If a specific image name is provided and exists in the source directory, include it
+    if specific_image_name and specific_image_name in all_files:
+        selected_files = [specific_image_name]
+        all_files.remove(specific_image_name)
+        num_images -= 1
+    else:
+        selected_files = []
+
+    # Select random files to copy
+    selected_files += random.sample(all_files, num_images)
+
+    # Copy selected files to the destination directory
+    for file in selected_files:
+        src_path = os.path.join(src_dir, file)
+        dest_path = os.path.join(dest_dir, file)
+        shutil.copy(src_path, dest_path)
+
+    print(f"Copied {len(selected_files)} images from {src_dir} to {dest_dir}")
+
+# Example usage:
+source_directory = 'path_to_source_directory'
+destination_directory = 'path_to_destination_directory'
+specific_image = 'specific_image_name.jpg'
+copy_random_images_with_specific(source_directory, destination_directory, num_images=100, specific_image_name=specific_image)
