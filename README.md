@@ -48,47 +48,34 @@ Solve the custom dataset gradient not match.
 import os
 import json
 
-def yolo_to_coco(yolo_dir, image_dir, output_file):
-    # 初始化COCO格式的字典
-    coco_data = {
-        "images": [],
-        "annotations": [],
-        "categories": []
-    }
-    
-    # 添加类别
-    for i in range(1, 81):  # YOLO类从0开始，COCO类从1开始
-        coco_data["categories"].append({
-            "id": i,
-            "name": f"class_{i}"
-        })
-    # 添加第81类
-    coco_data["categories"].append({
-        "id": 81,
-        "name": "class_81"
-    })
+def merge_yolo_coco(yolo_dir, coco_annotation_file, output_file):
+    # 读取原始COCO注释文件
+    with open(coco_annotation_file, 'r') as f:
+        coco_data = json.load(f)
 
-    annotation_id = 1
-    for idx, filename in enumerate(os.listdir(yolo_dir)):
+    annotation_id = max([anno['id'] for anno in coco_data['annotations']]) + 1
+    image_id_map = {img['file_name']: img['id'] for img in coco_data['images']}
+    category_id_map = {cat['name']: cat['id'] for cat in coco_data['categories']}
+    
+    # 添加新的类别81
+    if 81 not in [cat['id'] for cat in coco_data['categories']]:
+        coco_data['categories'].append({
+            "id": 81,
+            "name": "class_81"
+        })
+
+    # 读取YOLO结果文件并转换
+    for filename in os.listdir(yolo_dir):
         if filename.endswith(".txt"):
-            image_id = idx + 1
             image_filename = filename.replace(".txt", ".jpg")
-            image_path = os.path.join(image_dir, image_filename)
+            if image_filename not in image_id_map:
+                continue
             
-            # 获取图像尺寸
-            from PIL import Image
-            image = Image.open(image_path)
-            width, height = image.size
+            image_id = image_id_map[image_filename]
+            image_info = next(img for img in coco_data['images'] if img['id'] == image_id)
+            width = image_info['width']
+            height = image_info['height']
             
-            # 添加图像信息到COCO数据中
-            coco_data["images"].append({
-                "id": image_id,
-                "file_name": image_filename,
-                "width": width,
-                "height": height
-            })
-            
-            # 读取YOLO标签文件
             yolo_file_path = os.path.join(yolo_dir, filename)
             with open(yolo_file_path, "r") as f:
                 for line in f.readlines():
@@ -96,7 +83,6 @@ def yolo_to_coco(yolo_dir, image_dir, output_file):
                     class_id = int(parts[0])
                     x_center, y_center, bbox_width, bbox_height = map(float, parts[1:])
                     
-                    # 转换坐标
                     x_min = (x_center - bbox_width / 2) * width
                     y_min = (y_center - bbox_height / 2) * height
                     bbox_width *= width
@@ -106,7 +92,6 @@ def yolo_to_coco(yolo_dir, image_dir, output_file):
                     if class_id == 0:
                         class_id = 81
                     
-                    # 添加标注信息到COCO数据中
                     coco_data["annotations"].append({
                         "id": annotation_id,
                         "image_id": image_id,
@@ -116,14 +101,14 @@ def yolo_to_coco(yolo_dir, image_dir, output_file):
                         "iscrowd": 0
                     })
                     annotation_id += 1
-    
-    # 保存COCO格式的JSON文件
+
+    # 保存合并后的注释文件
     with open(output_file, "w") as f:
         json.dump(coco_data, f, indent=4)
 
 # 使用示例
 yolo_dir = "path/to/yolo/labels"  # 替换为YOLO标签文件的路径
-image_dir = "path/to/images"  # 替换为图像文件的路径
-output_file = "path/to/output/coco_annotations.json"  # 替换为输出COCO文件的路径
+coco_annotation_file = "path/to/coco/annotations.json"  # 替换为COCO注释文件的路径
+output_file = "path/to/output/merged_annotations.json"  # 替换为输出合并文件的路径
 
-yolo_to_coco(yolo_dir, image_dir, output_file)
+merge_yolo_coco(yolo_dir, coco_annotation_file, output_file)
