@@ -46,33 +46,36 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 import os
-from collections import Counter
+import random
+import shutil
 
-def count_yolo_labels(labels_dir):
+def copy_random_images(src_dir, dest_dir, num_images=100):
     """
-    Count the number of targets for each label in a YOLO dataset.
+    Copy a specified number of random images from the source directory to the destination directory.
 
     Parameters:
-    labels_dir (str): Directory containing the YOLO label files.
-
-    Returns:
-    Counter: A Counter object with label counts.
+    src_dir (str): The source directory containing images.
+    dest_dir (str): The destination directory to copy images to.
+    num_images (int): The number of images to copy. Default is 100.
     """
-    label_counts = Counter()
-    
-    for label_file in os.listdir(labels_dir):
-        if label_file.endswith('.txt'):
-            with open(os.path.join(labels_dir, label_file), 'r') as file:
-                for line in file:
-                    label = int(line.split()[0])  # Assuming the first value in each line is the label index
-                    label_counts[label] += 1
+    # Get list of all files in the source directory
+    all_files = [f for f in os.listdir(src_dir) if os.path.isfile(os.path.join(src_dir, f))]
 
-    return label_counts
+    # Ensure the destination directory exists
+    os.makedirs(dest_dir, exist_ok=True)
+
+    # Select random files to copy
+    selected_files = random.sample(all_files, num_images)
+
+    # Copy selected files to the destination directory
+    for file in selected_files:
+        src_path = os.path.join(src_dir, file)
+        dest_path = os.path.join(dest_dir, file)
+        shutil.copy(src_path, dest_path)
+
+    print(f"Copied {num_images} images from {src_dir} to {dest_dir}")
 
 # Example usage:
-labels_directory = 'path_to_your_yolo_labels'
-label_counts = count_yolo_labels(labels_directory)
-
-# Print the counts for each label
-for label, count in label_counts.items():
-    print(f"Label {label}: {count} targets")
+source_directory = 'path_to_source_directory'
+destination_directory = 'path_to_destination_directory'
+copy_random_images(source_directory, destination_directory, num_images=100)
