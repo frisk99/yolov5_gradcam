@@ -45,34 +45,44 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
-from pycocotools.coco import COCO
+import json
 import os
+
+def is_intersecting(bbox1, bbox2):
+    """
+    检查两个边界框是否相交
+    bbox: [x, y, width, height]
+    """
+    x1_min, y1_min, w1, h1 = bbox1
+    x1_max, y1_max = x1_min + w1, y1_min + h1
+    
+    x2_min, y2_min, w2, h2 = bbox2
+    x2_max, y2_max = x2_min + w2, y2_min + h2
+
+    intersect = not (x1_min > x2_max or x1_max < x2_min or y1_min > y2_max or y1_max < y2_min)
+    return intersect
 
 # 定义路径
 data_dir = 'path/to/coco'
 data_type = 'val2017'
 ann_file = os.path.join(data_dir, 'annotations', f'instances_{data_type}.json')
 
-# 初始化COCO api
-coco = COCO(ann_file)
+# 读取JSON文件
+with open(ann_file, 'r') as f:
+    coco_data = json.load(f)
 
 # 获取类别id
-category_ids = coco.getCatIds()
-person_category_id = coco.getCatIds(catNms=['person'])[0]
-specific_category_id = coco.getCatIds(catNms=['specific_category'])[0]  # 具体类的名字，如 'dog'
-
-# 获取所有图像id
-image_ids = coco.getImgIds()
+person_category_id = next(cat['id'] for cat in coco_data['categories'] if cat['name'] == 'person')
+specific_category_id = next(cat['id'] for cat in coco_data['categories'] if cat['name'] == 'toaster')  # 替换为具体类别名称
 
 # 初始化要移除的标注列表
 annotations_to_remove = []
 
-for img_id in image_ids:
-    # 获取图像的所有标注id
-    annotation_ids = coco.getAnnIds(imgIds=img_id)
-    annotations = coco.loadAnns(annotation_ids)
+# 遍历所有图像
+for img in coco_data['images']:
+    img_id = img['id']
+    annotations = [ann for ann in coco_data['annotations'] if ann['image_id'] == img_id]
     
-    # 获取第1类和第81类物体的标注
     person_annotations = [ann for ann in annotations if ann['category_id'] == person_category_id]
     specific_annotations = [ann for ann in annotations if ann['category_id'] == specific_category_id]
 
@@ -90,26 +100,11 @@ for img_id in image_ids:
             annotations_to_remove.append(specific_ann['id'])
 
 # 移除不符合条件的标注
-for ann_id in annotations_to_remove:
-    coco.dataset['annotations'] = [ann for ann in coco.dataset['annotations'] if ann['id'] != ann_id]
+coco_data['annotations'] = [ann for ann in coco_data['annotations'] if ann['id'] not in annotations_to_remove]
 
 # 保存修改后的注释文件
 output_file = os.path.join(data_dir, 'annotations', f'instances_{data_type}_filtered.json')
 with open(output_file, 'w') as f:
-    json.dump(coco.dataset, f)
+    json.dump(coco_data, f)
 
 print(f"Filtered annotations saved to {output_file}")
-
-def is_intersecting(bbox1, bbox2):
-    """
-    检查两个边界框是否相交
-    bbox: [x, y, width, height]
-    """
-    x1_min, y1_min, w1, h1 = bbox1
-    x1_max, y1_max = x1_min + w1, y1_min + h1
-    
-    x2_min, y2_min, w2, h2 = bbox2
-    x2_max, y2_max = x2_min + w2, y2_min + h2
-
-    intersect = not (x1_min > x2_max or x1_max < x2_min or y1_min > y2_max or y1_max < y2_min)
-    return intersect
