@@ -57,23 +57,21 @@ def copy_matching_files(src_dir_a, src_dir_b, dest_dir_c):
     src_dir_b (str): The source directory B containing files to match.
     dest_dir_c (str): The destination directory C to copy matched files to.
     """
-    # Get list of files in both source directories
-    files_a = set(os.listdir(src_dir_a))
-    files_b = set(os.listdir(src_dir_b))
-
-    # Find the intersection of the two sets (files with the same name in both directories)
-    matching_files = files_a.intersection(files_b)
+    # Get list of files in source directory B
+    files_b = os.listdir(src_dir_b)
 
     # Ensure the destination directory exists
     os.makedirs(dest_dir_c, exist_ok=True)
 
     # Copy matching files from source directory A to destination directory C
-    for file in matching_files:
+    for file in files_b:
         src_path = os.path.join(src_dir_a, file)
         dest_path = os.path.join(dest_dir_c, file)
-        shutil.copy(src_path, dest_path)
+        # Check if the file exists in source directory A
+        if os.path.isfile(src_path):
+            shutil.copy(src_path, dest_path)
 
-    print(f"Copied {len(matching_files)} matching files from {src_dir_a} to {dest_dir_c}")
+    print(f"Copied matching files from {src_dir_a} to {dest_dir_c}")
 
 # Example usage:
 source_directory_a = 'path_to_source_directory_a'
