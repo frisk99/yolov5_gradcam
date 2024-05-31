@@ -45,36 +45,71 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
+from pycocotools.coco import COCO
 import os
-import shutil
 
-def copy_matching_files(src_dir_a, src_dir_b, dest_dir_c):
+# 定义路径
+data_dir = 'path/to/coco'
+data_type = 'val2017'
+ann_file = os.path.join(data_dir, 'annotations', f'instances_{data_type}.json')
+
+# 初始化COCO api
+coco = COCO(ann_file)
+
+# 获取类别id
+category_ids = coco.getCatIds()
+person_category_id = coco.getCatIds(catNms=['person'])[0]
+specific_category_id = coco.getCatIds(catNms=['specific_category'])[0]  # 具体类的名字，如 'dog'
+
+# 获取所有图像id
+image_ids = coco.getImgIds()
+
+# 初始化要移除的标注列表
+annotations_to_remove = []
+
+for img_id in image_ids:
+    # 获取图像的所有标注id
+    annotation_ids = coco.getAnnIds(imgIds=img_id)
+    annotations = coco.loadAnns(annotation_ids)
+    
+    # 获取第1类和第81类物体的标注
+    person_annotations = [ann for ann in annotations if ann['category_id'] == person_category_id]
+    specific_annotations = [ann for ann in annotations if ann['category_id'] == specific_category_id]
+
+    for specific_ann in specific_annotations:
+        specific_bbox = specific_ann['bbox']
+        has_intersection = False
+
+        for person_ann in person_annotations:
+            person_bbox = person_ann['bbox']
+            if is_intersecting(specific_bbox, person_bbox):
+                has_intersection = True
+                break
+
+        if not has_intersection:
+            annotations_to_remove.append(specific_ann['id'])
+
+# 移除不符合条件的标注
+for ann_id in annotations_to_remove:
+    coco.dataset['annotations'] = [ann for ann in coco.dataset['annotations'] if ann['id'] != ann_id]
+
+# 保存修改后的注释文件
+output_file = os.path.join(data_dir, 'annotations', f'instances_{data_type}_filtered.json')
+with open(output_file, 'w') as f:
+    json.dump(coco.dataset, f)
+
+print(f"Filtered annotations saved to {output_file}")
+
+def is_intersecting(bbox1, bbox2):
     """
-    Copy files from source directory A to destination directory C if they have the same name as files in source directory B.
-
-    Parameters:
-    src_dir_a (str): The source directory A containing files to be checked and copied.
-    src_dir_b (str): The source directory B containing files to match.
-    dest_dir_c (str): The destination directory C to copy matched files to.
+    检查两个边界框是否相交
+    bbox: [x, y, width, height]
     """
-    # Get list of files in source directory B
-    files_b = os.listdir(src_dir_b)
+    x1_min, y1_min, w1, h1 = bbox1
+    x1_max, y1_max = x1_min + w1, y1_min + h1
+    
+    x2_min, y2_min, w2, h2 = bbox2
+    x2_max, y2_max = x2_min + w2, y2_min + h2
 
-    # Ensure the destination directory exists
-    os.makedirs(dest_dir_c, exist_ok=True)
-
-    # Copy matching files from source directory A to destination directory C
-    for file in files_b:
-        src_path = os.path.join(src_dir_a, file)
-        dest_path = os.path.join(dest_dir_c, file)
-        # Check if the file exists in source directory A
-        if os.path.isfile(src_path):
-            shutil.copy(src_path, dest_path)
-
-    print(f"Copied matching files from {src_dir_a} to {dest_dir_c}")
-
-# Example usage:
-source_directory_a = 'path_to_source_directory_a'
-source_directory_b = 'path_to_source_directory_b'
-destination_directory_c = 'path_to_destination_directory_c'
-copy_matching_files(source_directory_a, source_directory_b, destination_directory_c)
+    intersect = not (x1_min > x2_max or x1_max < x2_min or y1_min > y2_max or y1_max < y2_min)
+    return intersect
