@@ -66,9 +66,15 @@ def visualize_and_save_coco_annotations(image_dir, annotation_file, output_dir):
         img_info = coco.loadImgs(img_id)[0]
         img_path = os.path.join(image_dir, img_info['file_name'])
         
+        # Check if the image file exists
+        if not os.path.exists(img_path):
+            print(f"Image file {img_info['file_name']} does not exist, skipping...")
+            continue
+        
         # Read the image
         image = cv2.imread(img_path)
         if image is None:
+            print(f"Failed to read image file {img_info['file_name']}, skipping...")
             continue
         
         # Get all annotations for the image
