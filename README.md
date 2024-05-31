@@ -45,46 +45,34 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
-import json
-def merge_coco_jsons(json1_path, json2_path, output_path):
-    with open(json1_path, 'r') as f:
-        coco1 = json.load(f)
-    
-    with open(json2_path, 'r') as f:
-        coco2 = json.load(f)
-    
-    # 以第一个JSON中的图片为准
-    image_ids_in_coco1 = set(img['id'] for img in coco1['images'])
-    
-    # 假设coco2中只有一个类别，并且需要设置为ID 81
-    if len(coco2['categories']) == 1:
-        head_category_id = coco2['categories'][0]['id']
-    else:
-        raise ValueError("coco2 should contain only one category")
-    
-    # 合并annotations
-    merged_annotations = coco1['annotations']
-    for annotation in coco2['annotations']:
-        if annotation['image_id'] in image_ids_in_coco1:
-            # 如果注释的类别ID是head的类别ID，则修改为81
-            if annotation['category_id'] == head_category_id:
-                annotation['category_id'] = 81
-            merged_annotations.append(annotation)
-    
-    # 更新coco1的annotations
-    coco1['annotations'] = merged_annotations
-    
-    # 添加head类别到categories
-    head_category = {
-        "id": 81,
-        "name": "head",
-        "supercategory": "none"
-    }
-    coco1['categories'].append(head_category)
-    
-    # 保存合并后的JSON
-    with open(output_path, 'w') as f:
-        json.dump(coco1, f, indent=4)
+import os
+from collections import Counter
 
-# 使用示例
-merge_coco_jsons('coco1.json', 'coco2.json', 'merged_coco.json')
+def count_yolo_labels(labels_dir):
+    """
+    Count the number of targets for each label in a YOLO dataset.
+
+    Parameters:
+    labels_dir (str): Directory containing the YOLO label files.
+
+    Returns:
+    Counter: A Counter object with label counts.
+    """
+    label_counts = Counter()
+    
+    for label_file in os.listdir(labels_dir):
+        if label_file.endswith('.txt'):
+            with open(os.path.join(labels_dir, label_file), 'r') as file:
+                for line in file:
+                    label = int(line.split()[0])  # Assuming the first value in each line is the label index
+                    label_counts[label] += 1
+
+    return label_counts
+
+# Example usage:
+labels_directory = 'path_to_your_yolo_labels'
+label_counts = count_yolo_labels(labels_directory)
+
+# Print the counts for each label
+for label, count in label_counts.items():
+    print(f"Label {label}: {count} targets")
