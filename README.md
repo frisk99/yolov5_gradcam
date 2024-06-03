@@ -112,3 +112,4 @@ coco_annotation_file = "path/to/coco/annotations.json"  # 替换为COCO注释文
 output_file = "path/to/output/merged_annotations.json"  # 替换为输出合并文件的路径
 
 merge_yolo_coco(yolo_dir, coco_annotation_file, output_file)
+【【Stable Diffusion】图生图 超详细使用方法和参数设置诀窍-哔哩哔哩】 https://b23.tv/OV1J3p8
