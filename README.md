@@ -45,92 +45,61 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
+import json
 import os
-import json
 
-def merge_yolo_coco(yolo_dir, coco_annotation_file, output_file):
-    # 读取原始COCO注释文件
-    with open(coco_annotation_file, 'r') as f:
-        coco_data = json.load(f)
-
-    annotation_id = max([anno['id'] for anno in coco_data['annotations']]) + 1
-    image_id_map = {img['file_name']: img['id'] for img in coco_data['images']}
-    category_id_map = {cat['name']: cat['id'] for cat in coco_data['categories']}
+def is_intersecting(bbox1, bbox2):
+    x1_min, y1_min, w1, h1 = bbox1
+    x1_max, y1_max = x1_min + w1, y1_min + h1
     
-    # 添加新的类别81
-    if 81 not in [cat['id'] for cat in coco_data['categories']]:
-        coco_data['categories'].append({
-            "id": 81,
-            "name": "class_81"
-        })
+    x2_min, y2_min, w2, h2 = bbox2
+    x2_max, y2_max = x2_min + w2, y2_min + h2
 
-    # 读取YOLO结果文件并转换
-    for filename in os.listdir(yolo_dir):
-        if filename.endswith(".txt"):
-            image_filename = filename.replace(".txt", ".jpg")
-            if image_filename not in image_id_map:
-                continue
-            
-            image_id = image_id_map[image_filename]
-            image_info = next(img for img in coco_data['images'] if img['id'] == image_id)
-            width = image_info['width']
-            height = image_info['height']
-            
-            yolo_file_path = os.path.join(yolo_dir, filename)
-            with open(yolo_file_path, "r") as f:
-                for line in f.readlines():
-                    parts = line.strip().split()
-                    class_id = int(parts[0])
-                    x_center, y_center, bbox_width, bbox_height = map(float, parts[1:])
-                    
-                    x_min = (x_center - bbox_width / 2) * width
-                    y_min = (y_center - bbox_height / 2) * height
-                    bbox_width *= width
-                    bbox_height *= height
-                    
-                    # 修改第0类为第81类
-                    if class_id == 0:
-                        class_id = 81
-                    
-                    coco_data["annotations"].append({
-                        "id": annotation_id,
-                        "image_id": image_id,
-                        "category_id": class_id,
-                        "bbox": [x_min, y_min, bbox_width, bbox_height],
-                        "area": bbox_width * bbox_height,
-                        "iscrowd": 0
-                    })
-                    annotation_id += 1
+    intersect = not (x1_min > x2_max or x1_max < x2_min or y1_min > y2_max or y1_max < y2_min)
+    return intersect
 
-    # 保存合并后的注释文件
-    with open(output_file, "w") as f:
-        json.dump(coco_data, f, indent=4)
-
-# 使用示例
-yolo_dir = "path/to/yolo/labels"  # 替换为YOLO标签文件的路径
-coco_annotation_file = "path/to/coco/annotations.json"  # 替换为COCO注释文件的路径
-output_file = "path/to/output/merged_annotations.json"  # 替换为输出合并文件的路径
-
-merge_yolo_coco(yolo_dir, coco_annotation_file, output_file)
-pip install torch==1.13.1+cu118 torchvision==0.14.1+cu118 torchaudio==0.13.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html -i
-import json
-from collections import defaultdict
-
-# 加载COCO数据集的标注文件
-with open('path_to_your_coco_annotations_file.json', 'r') as f:
+# 定义路径
+ann_file = 'coco91_val.json'
+# 读取JSON文件
+with open(ann_file, 'r') as f:
     coco_data = json.load(f)
+# 获取类别id
+person_category_id = next(cat['id'] for cat in coco_data['categories'] if cat['name'] == 'person')
+specific_category_id = next(cat['id'] for cat in coco_data['categories'] if cat['name'] == 'head') 
+print(specific_category_id)
+# 初始化要移除的标注列表
+annotations_to_remove = []
+remove_cnt = 0
+# 遍历所有图像
+for img in coco_data['images']:
+    img_id = img['id']
+    print(img_id)
+    annotations = [ann for ann in coco_data['annotations'] if ann['image_id'] == img_id]
+    person_annotations = [ann for ann in annotations if ann['category_id'] == person_category_id]
+    specific_annotations = [ann for ann in annotations if ann['category_id'] == specific_category_id]
+    for specific_ann in specific_annotations:
+        specific_bbox = specific_ann['bbox']
+        has_intersection = False
+        for person_ann in person_annotations:
+            person_bbox = person_ann['bbox']
+            if is_intersecting(specific_bbox, person_bbox):
+                has_intersection = True
+                break
+        if not has_intersection:
+            annotations_to_remove.append(specific_ann['id'])
+            print("remove!")
+            remove_cnt = remove_cnt +1
 
-# 提取类别信息
-categories = coco_data['categories']
-category_id_to_name = {category['id']: category['name'] for category in categories}
+# 移除不符合条件的标注
+coco_data['annotations'] = [ann for ann in coco_data['annotations'] if ann['id'] not in annotations_to_remove]
 
-# 初始化类别计数，包括所有类别
-category_count = {category_id: 0 for category_id in category_id_to_name.keys()}
+# 保存修改后的注释文件
+output_file = 'coco_91_val_checked_1.json'
+with open(output_file, 'w') as f:
+    json.dump(coco_data, f)
 
-# 统计每个类别的数量
-for annotation in coco_data['annotations']:
-    category_id = annotation['category_id']
-    category_count[category_id] += 1
+print(f"Filtered annotations saved to {output_file}")
+print(f"remove {remove_cnt} !")
 
 # 输出结果，包括数量为0的类别
 for category_id, count in category_count.items():
