@@ -112,4 +112,24 @@ coco_annotation_file = "path/to/coco/annotations.json"  # 替换为COCO注释文
 output_file = "path/to/output/merged_annotations.json"  # 替换为输出合并文件的路径
 
 merge_yolo_coco(yolo_dir, coco_annotation_file, output_file)
-pip install torch==1.13.1+cu118 torchvision==0.14.1+cu118 torchaudio==0.13.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install torch==1.13.1+cu118 torchvision==0.14.1+cu118 torchaudio==0.13.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html -i
+import json
+from collections import defaultdict
+
+# 加载COCO数据集的标注文件
+with open('path_to_your_coco_annotations_file.json', 'r') as f:
+    coco_data = json.load(f)
+
+# 提取类别信息
+categories = coco_data['categories']
+category_id_to_name = {category['id']: category['name'] for category in categories}
+
+# 统计每个类别的数量
+category_count = defaultdict(int)
+for annotation in coco_data['annotations']:
+    category_id = annotation['category_id']
+    category_count[category_id] += 1
+
+# 输出结果
+for category_id, count in category_count.items():
+    print(f"Category: {category_id_to_name[category_id]}, Count: {count}")
