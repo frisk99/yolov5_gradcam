@@ -124,12 +124,14 @@ with open('path_to_your_coco_annotations_file.json', 'r') as f:
 categories = coco_data['categories']
 category_id_to_name = {category['id']: category['name'] for category in categories}
 
+# 初始化类别计数，包括所有类别
+category_count = {category_id: 0 for category_id in category_id_to_name.keys()}
+
 # 统计每个类别的数量
-category_count = defaultdict(int)
 for annotation in coco_data['annotations']:
     category_id = annotation['category_id']
     category_count[category_id] += 1
 
-# 输出结果
+# 输出结果，包括数量为0的类别
 for category_id, count in category_count.items():
     print(f"Category: {category_id_to_name[category_id]}, Count: {count}")
