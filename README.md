@@ -112,4 +112,4 @@ coco_annotation_file = "path/to/coco/annotations.json"  # 替换为COCO注释文
 output_file = "path/to/output/merged_annotations.json"  # 替换为输出合并文件的路径
 
 merge_yolo_coco(yolo_dir, coco_annotation_file, output_file)
-解压密码：bilibili@秋葉aaaki
+pip install torch==1.13.1+cu118 torchvision==0.14.1+cu118 torchaudio==0.13.1+cu118 -f https://download.pytorch.org/whl/torch_stable.html -i https://pypi.tuna.tsinghua.edu.cn/simple
