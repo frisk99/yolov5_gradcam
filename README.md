@@ -104,3 +104,7 @@ print(f"remove {remove_cnt} !")
 # 输出结果，包括数量为0的类别
 for category_id, count in category_count.items():
     print(f"Category: {category_id_to_name[category_id]}, Count: {count}")
+ADD_EXECUTABLE(${PROJECT_NAME}-test ${SRCS})
+TARGET_LINK_LIBRARIES(${PROJECT_NAME}-test ${PKGS_LDFLAGS} pthread dl)
+
+INSTALL(TARGETS ${PROJECT_NAME}-test DESTINATION ${BINDIR})
