@@ -46,30 +46,26 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 
-import cv2
-import numpy as np
+from PIL import Image
 
-# 读取图像和掩码
-image = cv2.imread('path/to/your/image.png')
-mask = cv2.imread('path/to/your/mask.png', cv2.IMREAD_GRAYSCALE)
+# 打开两张图片
+img1 = Image.open('path_to_image1.png').convert("RGB")
+img2 = Image.open('path_to_image2.png').convert("RGB")
 
-# 确保掩码为二值图像
-_, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+# 获取图片的像素数据
+pixels1 = img1.load()
+pixels2 = img2.load()
 
-# 将掩码反转，因为我们需要白色区域作为掩码
-mask_inv = cv2.bitwise_not(mask)
+# 获取图片的尺寸
+width, height = img1.size
 
-# 将图像中的掩码区域保留
-image_masked = cv2.bitwise_and(image, image, mask=mask_inv)
+# 遍历每个像素
+for x in range(width):
+    for y in range(height):
+        # 如果图片一的像素是白色
+        if pixels1[x, y] == (255, 255, 255):
+            # 将图片二的对应像素改为白色
+            pixels2[x, y] = (255, 255, 255)
 
-# 创建一个白色背景的图像与掩码大小相同
-white_background = np.full_like(image, 255)
-
-# 仅保留白色背景中的掩码区域
-mask_applied = cv2.bitwise_and(white_background, white_background, mask=mask)
-
-# 合并图像和掩码
-result = cv2.add(image_masked, mask_applied)
-
-# 保存结果
-cv2.imwrite('result_image.png', result)
+# 保存结果图片
+img2.save('result_image.png')
