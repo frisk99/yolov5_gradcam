@@ -1,4 +1,4 @@
-2# YOLO-V5 GRADCAM
+# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -45,17 +45,22 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
-cmake_minimum_required(VERSION 3.16)
-project(android_test C CXX)
 
-INCLUDE_DIRECTORIES("/home/shi.zhou/tensorflow-2.15.1/tensorflow/lite/examples/android_test/include")
+import cv2
+import numpy as np
 
-LINK_DIRECTORIES("/home/shi.zhou/tensorflow-2.15.1/tensorflow/lite/examples/android_test/lib/armeabi-v7a")
-set(CMAKE_CXX_STANDARD 17)
-add_executable(android_test 
-minimal.cc
-)
-target_link_libraries(android_test
-	tensorflowlite
-)
+# 读取图像和掩码
+image = cv2.imread('path/to/your/image.png')
+mask = cv2.imread('path/to/your/mask.png', cv2.IMREAD_GRAYSCALE)
 
+# 确保掩码为二值图像
+_, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
+
+# 创建一个3通道的掩码
+mask_3channel = cv2.merge([mask, mask, mask])
+
+# 将掩码应用于图像
+result = np.where(mask_3channel == 255, 255, image)
+
+# 保存结果
+cv2.imwrite('result_image.png', result)
