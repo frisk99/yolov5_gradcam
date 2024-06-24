@@ -56,11 +56,20 @@ mask = cv2.imread('path/to/your/mask.png', cv2.IMREAD_GRAYSCALE)
 # 确保掩码为二值图像
 _, mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)
 
-# 创建一个3通道的掩码
-mask_3channel = cv2.merge([mask, mask, mask])
+# 将掩码反转，因为我们需要白色区域作为掩码
+mask_inv = cv2.bitwise_not(mask)
 
-# 将掩码应用于图像
-result = np.where(mask_3channel == 255, 255, image)
+# 将图像中的掩码区域保留
+image_masked = cv2.bitwise_and(image, image, mask=mask_inv)
+
+# 创建一个白色背景的图像与掩码大小相同
+white_background = np.full_like(image, 255)
+
+# 仅保留白色背景中的掩码区域
+mask_applied = cv2.bitwise_and(white_background, white_background, mask=mask)
+
+# 合并图像和掩码
+result = cv2.add(image_masked, mask_applied)
 
 # 保存结果
 cv2.imwrite('result_image.png', result)
