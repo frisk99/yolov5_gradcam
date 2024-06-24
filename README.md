@@ -47,25 +47,26 @@ Solve the custom dataset gradient not match.
 ```python
 
 from PIL import Image
+import os
 
-# 打开两张图片
-img1 = Image.open('path_to_image1.png').convert("RGB")
-img2 = Image.open('path_to_image2.png').convert("RGB")
+# 定义source和target目录
+source_dir = "path_to_your_source_directory"  # 替换为你的source目录路径
+target_dir = "path_to_your_target_directory"  # 替换为你的target目录路径
 
-# 获取图片的像素数据
-pixels1 = img1.load()
-pixels2 = img2.load()
+# 确保target目录存在
+os.makedirs(target_dir, exist_ok=True)
 
-# 获取图片的尺寸
-width, height = img1.size
+# 定义目标大小
+target_size = (512, 512)
 
-# 遍历每个像素
-for x in range(width):
-    for y in range(height):
-        # 如果图片一的像素是白色
-        if pixels1[x, y] == (255, 255, 255):
-            # 将图片二的对应像素改为白色
-            pixels2[x, y] = (255, 255, 255)
+# 处理source目录中的每个图片文件
+for file_name in os.listdir(source_dir):
+    if file_name.endswith(('.png', '.jpg', '.jpeg')):
+        img_path = os.path.join(source_dir, file_name)
+        with Image.open(img_path) as img:
+            # 调整图片大小
+            img = img.resize(target_size, Image.ANTIALIAS)
+            # 保存图片到target目录
+            img.save(os.path.join(target_dir, file_name))
 
-# 保存结果图片
-img2.save('result_image.png')
+print("所有图片已成功调整大小并保存。")
