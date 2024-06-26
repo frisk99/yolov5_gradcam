@@ -46,27 +46,48 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 
-from PIL import Image
-import os
+import numpy as np
 
-# 定义source和target目录
-source_dir = "path_to_your_source_directory"  # 替换为你的source目录路径
-target_dir = "path_to_your_target_directory"  # 替换为你的target目录路径
+# 定义点的原始坐标
+x, y, z = 1, 2, 3
 
-# 确保target目录存在
-os.makedirs(target_dir, exist_ok=True)
+# 旋转角度（30度）
+theta = np.radians(30)
 
-# 定义目标大小
-target_size = (512, 512)
+# 定义绕 x 轴旋转 30 度的旋转矩阵
+R_x = np.array([
+    [1, 0, 0, 0],
+    [0, np.cos(theta), -np.sin(theta), 0],
+    [0, np.sin(theta), np.cos(theta), 0],
+    [0, 0, 0, 1]
+])
 
-# 处理source目录中的每个图片文件
-for file_name in os.listdir(source_dir):
-    if file_name.endswith(('.png', '.jpg', '.jpeg')):
-        img_path = os.path.join(source_dir, file_name)
-        with Image.open(img_path) as img:
-            # 调整图片大小
-            img = img.resize(target_size, Image.ANTIALIAS)
-            # 保存图片到target目录
-            img.save(os.path.join(target_dir, file_name))
+# 定义绕 y 轴旋转 30 度的旋转矩阵
+R_y = np.array([
+    [np.cos(theta), 0, np.sin(theta), 0],
+    [0, 1, 0, 0],
+    [-np.sin(theta), 0, np.cos(theta), 0],
+    [0, 0, 0, 1]
+])
 
-print("所有图片已成功调整大小并保存。")
+# 定义绕 z 轴旋转 30 度的旋转矩阵
+R_z = np.array([
+    [np.cos(theta), -np.sin(theta), 0, 0],
+    [np.sin(theta), np.cos(theta), 0, 0],
+    [0, 0, 1, 0],
+    [0, 0, 0, 1]
+])
+
+# 组合旋转矩阵
+R = np.dot(np.dot(R_z, R_y), R_x)
+
+# 定义点的齐次坐标
+P = np.array([x, y, z, 1])
+
+# 进行坐标变换
+P_prime = np.dot(R, P)
+
+# 提取变换后的坐标
+x_prime, y_prime, z_prime = P_prime[:3]
+
+print("变换后的坐标: ", x_prime, y_prime, z_prime)
