@@ -57,21 +57,20 @@ def page2():
 def page3():
     return "This is page 3"
 
-def switch_page(slider_value):
-    if slider_value == 0:
-        return page1()
-    elif slider_value == 1:
-        return page2()
-    elif slider_value == 2:
-        return page3()
+def switch_page(page_index):
+    pages = [page1, page2, page3]
+    return pages[page_index % len(pages)]()
 
 with gr.Blocks() as demo:
+    page_index = gr.State(value=0)
     with gr.Row():
-        with gr.Column():
-            slider = gr.Slider(minimum=0, maximum=2, step=1, label="Select Page")
-        with gr.Column():
-            output = gr.Textbox(label="Page Content")
+        with gr.Column(scale=1):
+            prev_button = gr.Button("⬅️ Previous")
+        with gr.Column(scale=8):
+            output = gr.Textbox(value=page1(), label="Page Content", interactive=False)
+        with gr.Column(scale=1):
+            next_button = gr.Button("Next ➡️")
     
-    slider.change(switch_page, inputs=slider, outputs=output)
-
-demo.launch()
+    prev_button.click(lambda idx: (idx - 1) % 3, inputs=page_index, outputs=page_index)
+    next_button.click(lambda idx: (idx + 1) % 3, inputs=page_index, outputs=page_index)
+    page_index.change(switch_page, inputs=page_index, outputs
