@@ -49,36 +49,34 @@ import gradio as gr
 
 def switch_page(page_index):
     if page_index == 0:
-        return ("Upload Image 1", gr.Image(label="Image 1", source="upload"), gr.update(visible=False))
+        return ("上传图片 1", gr.Image(label="图片 1", source="upload"), gr.update(visible=False))
     elif page_index == 1:
-        return ("Upload Image 2", gr.Image(label="Image 2", source="upload"), gr.update(visible=False))
+        return ("上传图片 2", gr.Image(label="图片 2", source="upload"), gr.update(visible=False))
     elif page_index == 2:
-        return ("Input Text", gr.Textbox(label="Input Text"), gr.update(visible=True))
+        return ("输入文本", gr.Textbox(label="输入文本"), gr.update(visible=True))
 
 with gr.Blocks() as demo:
     page_index = gr.State(value=0)
     
     with gr.Row():
         with gr.Column(scale=1):
-            prev_button = gr.Button("⬅️ Previous")
+            prev_button = gr.Button("⬅️ 上一页")
         with gr.Column(scale=8):
-            title = gr.Textbox(label="Page Title", interactive=False)
+            title = gr.Textbox(label="页面标题", interactive=False)
             content = gr.Column()
-            run_button = gr.Button("Run", visible=False)
+            run_button = gr.Button("运行", visible=False)
         with gr.Column(scale=1):
-            next_button = gr.Button("Next ➡️")
+            next_button = gr.Button("下一页 ➡️")
     
     def prev_click(idx):
         idx = (idx - 1) % 3
         title_text, content_component, run_visible = switch_page(idx)
-        content.children = [content_component]
-        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
+        return idx, title_text, gr.update(visible=True, children=[content_component]), run_button.update(visible=run_visible)
 
     def next_click(idx):
         idx = (idx + 1) % 3
         title_text, content_component, run_visible = switch_page(idx)
-        content.children = [content_component]
-        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
+        return idx, title_text, gr.update(visible=True, children=[content_component]), run_button.update(visible=run_visible)
 
     prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content, run_button])
     next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content, run_button])
