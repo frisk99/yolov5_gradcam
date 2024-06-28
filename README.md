@@ -49,11 +49,11 @@ import gradio as gr
 
 def switch_page(page_index):
     if page_index == 0:
-        return ("上传图片 1", gr.Image(label="图片 1", source="upload"), gr.update(visible=False))
+        return "上传图片 1", gr.Image(label="图片 1", source="upload"), False
     elif page_index == 1:
-        return ("上传图片 2", gr.Image(label="图片 2", source="upload"), gr.update(visible=False))
+        return "上传图片 2", gr.Image(label="图片 2", source="upload"), False
     elif page_index == 2:
-        return ("输入文本", gr.Textbox(label="输入文本"), gr.update(visible=True))
+        return "输入文本", gr.Textbox(label="输入文本"), True
 
 with gr.Blocks() as demo:
     page_index = gr.State(value=0)
@@ -63,7 +63,7 @@ with gr.Blocks() as demo:
             prev_button = gr.Button("⬅️ 上一页")
         with gr.Column(scale=8):
             title = gr.Textbox(label="页面标题", interactive=False)
-            content = gr.Column()
+            content_placeholder = gr.Column()
             run_button = gr.Button("运行", visible=False)
         with gr.Column(scale=1):
             next_button = gr.Button("下一页 ➡️")
@@ -71,18 +71,14 @@ with gr.Blocks() as demo:
     def prev_click(idx):
         idx = (idx - 1) % 3
         title_text, content_component, run_visible = switch_page(idx)
-        return idx, title_text, gr.update(visible=True, children=[content_component]), run_button.update(visible=run_visible)
+        return idx, title_text, content_component, run_button.update(visible=run_visible)
 
     def next_click(idx):
         idx = (idx + 1) % 3
         title_text, content_component, run_visible = switch_page(idx)
-        return idx, title_text, gr.update(visible=True, children=[content_component]), run_button.update(visible=run_visible)
+        return idx, title_text, content_component, run_button.update(visible=run_visible)
 
-    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content, run_button])
-    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content, run_button])
-
-/home/shizhou/miniforge3/envs/control/lib/python3.8/site-packages/fastapi/routing.py:191: GradioUnusedKwargWarning: You have unused kwarg parameters in Column, please remove them: {'children': [textbox]}
-  return await dependant.call(**values)
-
+    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content_placeholder, run_button])
+    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content_placeholder, run_button])
 
 demo.launch(server_port=8890)
