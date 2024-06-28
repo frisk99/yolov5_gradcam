@@ -56,7 +56,7 @@ def page2():
 def page3():
     return "This is page 3"
 
-def switch_page(page_index):
+def update_page_content(page_index):
     pages = [page1, page2, page3]
     return pages[page_index % len(pages)]()
 
@@ -70,7 +70,15 @@ with gr.Blocks() as demo:
         with gr.Column(scale=1):
             next_button = gr.Button("Next ➡️")
     
-    prev_button.click(lambda idx: (idx - 1) % 3, inputs=page_index, outputs=[page_index, output], fn=lambda idx: (idx, switch_page(idx)))
-    next_button.click(lambda idx: (idx + 1) % 3, inputs=page_index, outputs=[page_index, output], fn=lambda idx: (idx, switch_page(idx)))
+    def prev_click(idx):
+        idx = (idx - 1) % 3
+        return idx, update_page_content(idx)
+    
+    def next_click(idx):
+        idx = (idx + 1) % 3
+        return idx, update_page_content(idx)
+    
+    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, output])
+    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, output])
 
 demo.launch(server_port=8890)
