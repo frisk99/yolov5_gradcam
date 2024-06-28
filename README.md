@@ -47,38 +47,40 @@ Solve the custom dataset gradient not match.
 ```python
 import gradio as gr
 
-def page1():
-    return "This is page 1"
-
-def page2():
-    return "This is page 2"
-
-def page3():
-    return "This is page 3"
-
-def update_page_content(page_index):
-    pages = [page1, page2, page3]
-    return pages[page_index % len(pages)]()
+def switch_page(page_index):
+    if page_index == 0:
+        return ("Upload Image 1", gr.Image(label="Image 1"), gr.update(visible=False))
+    elif page_index == 1:
+        return ("Upload Image 2", gr.Image(label="Image 2"), gr.update(visible=False))
+    elif page_index == 2:
+        return ("Input Text", gr.Textbox(label="Input Text"), gr.Button("Run", visible=True))
 
 with gr.Blocks() as demo:
     page_index = gr.State(value=0)
+    
     with gr.Row():
         with gr.Column(scale=1):
             prev_button = gr.Button("⬅️ Previous")
         with gr.Column(scale=8):
-            output = gr.Textbox(value=page1(), label="Page Content", interactive=False)
+            title = gr.Textbox(label="Page Title", interactive=False)
+            content = gr.Column(visible=False)
+            run_button = gr.Button("Run", visible=False)
         with gr.Column(scale=1):
             next_button = gr.Button("Next ➡️")
     
     def prev_click(idx):
         idx = (idx - 1) % 3
-        return idx, update_page_content(idx)
-    
+        title_text, content_component, run_visible = switch_page(idx)
+        content.children = [content_component]
+        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
+
     def next_click(idx):
         idx = (idx + 1) % 3
-        return idx, update_page_content(idx)
+        title_text, content_component, run_visible = switch_page(idx)
+        content.children = [content_component]
+        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
     
-    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, output])
-    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, output])
+    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content, run_button])
+    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content, run_button])
 
 demo.launch(server_port=8890)
