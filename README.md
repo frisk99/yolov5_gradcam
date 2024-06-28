@@ -98,3 +98,8 @@ with gr.Blocks() as demo:
     next_button.click(fn=next_page_func, inputs=page_index, outputs=[page_index, page0, page1, page2])
 
 demo.launch(server_port=8890)
+ValueError: An event handler (next_page_func) didn't receive enough output values (needed: 4, received: 2).
+Wanted outputs:
+    [state, <gradio.layouts.Column object at 0x7fcbdf55f5e0>, <gradio.layouts.Column object at 0x7fcbdf55f880>, <gradio.layouts.Column object at 0x7fcbdf55fac0>]
+Received outputs:
+    [1, ({'__type__': 'update', 'visible': False}, {'__type__': 'update', 'visible': True}, {'__type__': 'update', 'visible': False}, {'__type__': 'update', 'visible': True}, {'__type__': 'update', 'visible': False})]
