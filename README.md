@@ -1,4 +1,4 @@
-# YOLO-V5 GRADCAM
+2# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -49,19 +49,19 @@ import gradio as gr
 
 def next_page_func(page_index):
     page_index = (page_index + 1) % 3
-    return page_index, update_page(page_index)
+    return page_index, *update_page(page_index)
 
 def pre_page_func(page_index):
     page_index = (page_index - 1) % 3
-    return page_index, update_page(page_index)
+    return page_index, *update_page(page_index)
 
 def update_page(page_index):
     if page_index == 0:
-        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
+        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
     elif page_index == 1:
-        return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
+        return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
     else:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False), gr.update(visible=True)
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
 
 def greet(name, page_index):
     return f"Hello {name}, you are on page {page_index}!"
@@ -98,8 +98,3 @@ with gr.Blocks() as demo:
     next_button.click(fn=next_page_func, inputs=page_index, outputs=[page_index, page0, page1, page2])
 
 demo.launch(server_port=8890)
-ValueError: An event handler (next_page_func) didn't receive enough output values (needed: 4, received: 2).
-Wanted outputs:
-    [state, <gradio.layouts.Column object at 0x7fcbdf55f5e0>, <gradio.layouts.Column object at 0x7fcbdf55f880>, <gradio.layouts.Column object at 0x7fcbdf55fac0>]
-Received outputs:
-    [1, ({'__type__': 'update', 'visible': False}, {'__type__': 'update', 'visible': True}, {'__type__': 'update', 'visible': False}, {'__type__': 'update', 'visible': True}, {'__type__': 'update', 'visible': False})]
