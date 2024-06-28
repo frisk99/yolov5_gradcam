@@ -45,7 +45,6 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
-
 import gradio as gr
 
 def page1():
@@ -73,4 +72,6 @@ with gr.Blocks() as demo:
     
     prev_button.click(lambda idx: (idx - 1) % 3, inputs=page_index, outputs=page_index)
     next_button.click(lambda idx: (idx + 1) % 3, inputs=page_index, outputs=page_index)
-    page_index.change(switch_page, inputs=page_index, outputs
+    page_index.change(switch_page, inputs=page_index, outputs=output)
+
+demo.launch(server_port=8890)
