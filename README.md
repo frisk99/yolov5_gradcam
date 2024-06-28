@@ -80,5 +80,5 @@ with gr.Blocks() as demo:
 
     prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content_placeholder, run_button])
     next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content_placeholder, run_button])
-
+You have unused kwarg parameters in Column, please remove them: {'label': '图片 1', 'source': 'upload'}
 demo.launch(server_port=8890)
