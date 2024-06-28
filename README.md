@@ -81,4 +81,8 @@ with gr.Blocks() as demo:
     prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content, run_button])
     next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content, run_button])
 
+/home/shizhou/miniforge3/envs/control/lib/python3.8/site-packages/fastapi/routing.py:191: GradioUnusedKwargWarning: You have unused kwarg parameters in Column, please remove them: {'children': [textbox]}
+  return await dependant.call(**values)
+
+
 demo.launch(server_port=8890)
