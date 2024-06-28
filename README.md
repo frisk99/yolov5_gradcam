@@ -47,8 +47,6 @@ Solve the custom dataset gradient not match.
 ```python
 import gradio as gr
 
-import gradio as gr
-
 def page1():
     return "This is page 1"
 
@@ -72,10 +70,7 @@ with gr.Blocks() as demo:
         with gr.Column(scale=1):
             next_button = gr.Button("Next ➡️")
     
-    prev_button.click(lambda idx: (idx - 1) % 3, inputs=page_index, outputs=page_index)
-    next_button.click(lambda idx: (idx + 1) % 3, inputs=page_index, outputs=page_index)
-    page_index.change(switch_page, inputs=page_index, outputs=output)
-
-    page_index.change(fn=switch_page, inputs=page_index, outputs=output)
+    prev_button.click(lambda idx: (idx - 1) % 3, inputs=page_index, outputs=[page_index, output], fn=lambda idx: (idx, switch_page(idx)))
+    next_button.click(lambda idx: (idx + 1) % 3, inputs=page_index, outputs=[page_index, output], fn=lambda idx: (idx, switch_page(idx)))
 
 demo.launch(server_port=8890)
