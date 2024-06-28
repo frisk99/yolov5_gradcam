@@ -49,11 +49,11 @@ import gradio as gr
 
 def switch_page(page_index):
     if page_index == 0:
-        return ("Upload Image 1", gr.Image(label="Image 1"), gr.update(visible=False))
+        return ("Upload Image 1", gr.Image(label="Image 1", source="upload"), gr.update(visible=False))
     elif page_index == 1:
-        return ("Upload Image 2", gr.Image(label="Image 2"), gr.update(visible=False))
+        return ("Upload Image 2", gr.Image(label="Image 2", source="upload"), gr.update(visible=False))
     elif page_index == 2:
-        return ("Input Text", gr.Textbox(label="Input Text"), gr.Button("Run", visible=True))
+        return ("Input Text", gr.Textbox(label="Input Text"), gr.update(visible=True))
 
 with gr.Blocks() as demo:
     page_index = gr.State(value=0)
@@ -63,7 +63,7 @@ with gr.Blocks() as demo:
             prev_button = gr.Button("⬅️ Previous")
         with gr.Column(scale=8):
             title = gr.Textbox(label="Page Title", interactive=False)
-            content = gr.Column(visible=False)
+            content = gr.Column()
             run_button = gr.Button("Run", visible=False)
         with gr.Column(scale=1):
             next_button = gr.Button("Next ➡️")
@@ -79,7 +79,7 @@ with gr.Blocks() as demo:
         title_text, content_component, run_visible = switch_page(idx)
         content.children = [content_component]
         return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
-    
+
     prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content, run_button])
     next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content, run_button])
 
