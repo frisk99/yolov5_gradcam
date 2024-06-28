@@ -46,34 +46,42 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 import gradio as gr
-
-def switch_page(page_index):
-    if page_index == 0:
-        return "上传图片 1", gr.Image(label="图片 1", source="upload"), False
-    elif page_index == 1:
-        return "上传图片 2", gr.Image(label="图片 2", source="upload"), False
-    elif page_index == 2:
-        return "输入文本", gr.Textbox(label="输入文本"), True
+page_index=0
+def next_page_func():
+    global page_index
+    page_index = (page_index+1) %3
+    # print('done!')
+    # print(page_index)
+def pre_page_func():
+    global page_index
+    page_index = (page_index-1) %3
+    # print('done!')
+    # print(page_index)
+def greet(name):
+    global page_index
+    idx = str(page_index)
+    return "Hello " + name+" "+idx + "!"
 
 with gr.Blocks() as demo:
-    page_index = gr.State(value=0)
-    
+    if page_index == 0:
+        print('catch 0')
+    elif page_index ==1:
+        print('catch 1')
+    else:
+        print('catch 2')
     with gr.Row():
         with gr.Column(scale=1):
             prev_button = gr.Button("⬅️ 上一页")
         with gr.Column(scale=8):
-            title = gr.Textbox(label="页面标题", interactive=False)
-            content = gr.Column()
-            run_button = gr.Button("运行", visible=False)
+            name = gr.Textbox(label="Name")
+            output = gr.Textbox(label="Output Box")
+            greet_btn = gr.Button("Greet")
+            greet_btn.click(fn=greet, inputs=name, outputs=output, api_name="greet")
+
         with gr.Column(scale=1):
             next_button = gr.Button("下一页 ➡️")
-    
-    def update_page(idx, component):
-        title_text, content_component, run_visible = switch_page(idx)
-        component.children = [content_component]
-        return idx, title_text, component.update(visible=True), run_button.update(visible=run_visible)
 
-    prev_button.click(fn=lambda idx: update_page((idx - 1) % 3, content), inputs=page_index, outputs=[page_index, title, content, run_button])
-    next_button.click(fn=lambda idx: update_page((idx + 1) % 3, content), inputs=page_index, outputs=[page_index, title, content, run_button])
+    prev_button.click(fn=pre_page_func)
+    next_button.click(fn=next_page_func)
 
 demo.launch(server_port=8890)
