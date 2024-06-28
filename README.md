@@ -57,11 +57,11 @@ def pre_page_func(page_index):
 
 def update_page(page_index):
     if page_index == 0:
-        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
+        return gr.update(visible=True), gr.update(visible(False), gr.update(visible=False)
     elif page_index == 1:
-        return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
+        return gr.update(visible(False), gr.update(visible=True), gr.update(visible(False)
     else:
-        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True)
+        return gr.update(visible=False), gr.update(visible(False), gr.update(visible=True)
 
 def greet(name, page_index):
     return f"Hello {name}, you are on page {page_index}!"
@@ -72,14 +72,12 @@ with gr.Blocks() as demo:
     with gr.Row():
         with gr.Column(scale=1):
             prev_button = gr.Button("⬅️ 上一页")
+            next_button = gr.Button("下一页 ➡️")
         with gr.Column(scale=8):
             name = gr.Textbox(label="Name")
             output = gr.Textbox(label="Output Box")
             greet_btn = gr.Button("Greet")
             greet_btn.click(fn=greet, inputs=[name, page_index], outputs=output)
-
-        with gr.Column(scale=1):
-            next_button = gr.Button("下一页 ➡️")
 
     # Page content containers
     page0 = gr.Column(visible=True)
