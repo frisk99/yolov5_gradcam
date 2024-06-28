@@ -46,48 +46,32 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 
-import numpy as np
+import gradio as gr
 
-# 定义点的原始坐标
-x, y, z = 1, 2, 3
+def page1():
+    return "This is page 1"
 
-# 旋转角度（30度）
-theta = np.radians(30)
+def page2():
+    return "This is page 2"
 
-# 定义绕 x 轴旋转 30 度的旋转矩阵
-R_x = np.array([
-    [1, 0, 0, 0],
-    [0, np.cos(theta), -np.sin(theta), 0],
-    [0, np.sin(theta), np.cos(theta), 0],
-    [0, 0, 0, 1]
-])
+def page3():
+    return "This is page 3"
 
-# 定义绕 y 轴旋转 30 度的旋转矩阵
-R_y = np.array([
-    [np.cos(theta), 0, np.sin(theta), 0],
-    [0, 1, 0, 0],
-    [-np.sin(theta), 0, np.cos(theta), 0],
-    [0, 0, 0, 1]
-])
+def switch_page(slider_value):
+    if slider_value == 0:
+        return page1()
+    elif slider_value == 1:
+        return page2()
+    elif slider_value == 2:
+        return page3()
 
-# 定义绕 z 轴旋转 30 度的旋转矩阵
-R_z = np.array([
-    [np.cos(theta), -np.sin(theta), 0, 0],
-    [np.sin(theta), np.cos(theta), 0, 0],
-    [0, 0, 1, 0],
-    [0, 0, 0, 1]
-])
+with gr.Blocks() as demo:
+    with gr.Row():
+        with gr.Column():
+            slider = gr.Slider(minimum=0, maximum=2, step=1, label="Select Page")
+        with gr.Column():
+            output = gr.Textbox(label="Page Content")
+    
+    slider.change(switch_page, inputs=slider, outputs=output)
 
-# 组合旋转矩阵
-R = np.dot(np.dot(R_z, R_y), R_x)
-
-# 定义点的齐次坐标
-P = np.array([x, y, z, 1])
-
-# 进行坐标变换
-P_prime = np.dot(R, P)
-
-# 提取变换后的坐标
-x_prime, y_prime, z_prime = P_prime[:3]
-
-print("变换后的坐标: ", x_prime, y_prime, z_prime)
+demo.launch()
