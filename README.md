@@ -68,19 +68,12 @@ with gr.Blocks() as demo:
         with gr.Column(scale=1):
             next_button = gr.Button("下一页 ➡️")
     
-    def prev_click(idx):
-        idx = (idx - 1) % 3
+    def update_page(idx, component):
         title_text, content_component, run_visible = switch_page(idx)
-        content.children = [content_component]  # Directly setting the children
-        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
+        component.children = [content_component]
+        return idx, title_text, component.update(visible=True), run_button.update(visible=run_visible)
 
-    def next_click(idx):
-        idx = (idx + 1) % 3
-        title_text, content_component, run_visible = switch_page(idx)
-        content.children = [content_component]  # Directly setting the children
-        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
-
-    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content, run_button])
-    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content, run_button])
+    prev_button.click(fn=lambda idx: update_page((idx - 1) % 3, content), inputs=page_index, outputs=[page_index, title, content, run_button])
+    next_button.click(fn=lambda idx: update_page((idx + 1) % 3, content), inputs=page_index, outputs=[page_index, title, content, run_button])
 
 demo.launch(server_port=8890)
