@@ -46,29 +46,29 @@ Solve the custom dataset gradient not match.
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
 import gradio as gr
-page_index=0
-def next_page_func():
-    global page_index
-    page_index = (page_index+1) %3
-    # print('done!')
-    # print(page_index)
-def pre_page_func():
-    global page_index
-    page_index = (page_index-1) %3
-    # print('done!')
-    # print(page_index)
-def greet(name):
-    global page_index
-    idx = str(page_index)
-    return "Hello " + name+" "+idx + "!"
+
+def next_page_func(page_index):
+    page_index = (page_index + 1) % 3
+    return page_index, update_page(page_index)
+
+def pre_page_func(page_index):
+    page_index = (page_index - 1) % 3
+    return page_index, update_page(page_index)
+
+def update_page(page_index):
+    if page_index == 0:
+        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
+    elif page_index == 1:
+        return gr.update(visible=False), gr.update(visible=True), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False)
+    else:
+        return gr.update(visible=False), gr.update(visible=False), gr.update(visible=True), gr.update(visible=False), gr.update(visible=True)
+
+def greet(name, page_index):
+    return f"Hello {name}, you are on page {page_index}!"
 
 with gr.Blocks() as demo:
-    if page_index == 0:
-        print('catch 0')
-    elif page_index ==1:
-        print('catch 1')
-    else:
-        print('catch 2')
+    page_index = gr.State(value=0)
+
     with gr.Row():
         with gr.Column(scale=1):
             prev_button = gr.Button("⬅️ 上一页")
@@ -76,12 +76,25 @@ with gr.Blocks() as demo:
             name = gr.Textbox(label="Name")
             output = gr.Textbox(label="Output Box")
             greet_btn = gr.Button("Greet")
-            greet_btn.click(fn=greet, inputs=name, outputs=output, api_name="greet")
+            greet_btn.click(fn=greet, inputs=[name, page_index], outputs=output)
 
         with gr.Column(scale=1):
             next_button = gr.Button("下一页 ➡️")
 
-    prev_button.click(fn=pre_page_func)
-    next_button.click(fn=next_page_func)
+    # Page content containers
+    page0 = gr.Column(visible=True)
+    with page0:
+        gr.Image(label="Upload Image for Page 0")
+        
+    page1 = gr.Column(visible=False)
+    with page1:
+        gr.Image(label="Upload Image for Page 1")
+        
+    page2 = gr.Column(visible=False)
+    with page2:
+        gr.Textbox(label="Content for Page 2")
+
+    prev_button.click(fn=pre_page_func, inputs=page_index, outputs=[page_index, page0, page1, page2])
+    next_button.click(fn=next_page_func, inputs=page_index, outputs=[page_index, page0, page1, page2])
 
 demo.launch(server_port=8890)
