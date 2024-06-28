@@ -63,7 +63,7 @@ with gr.Blocks() as demo:
             prev_button = gr.Button("⬅️ 上一页")
         with gr.Column(scale=8):
             title = gr.Textbox(label="页面标题", interactive=False)
-            content_placeholder = gr.Column()
+            content = gr.Column()
             run_button = gr.Button("运行", visible=False)
         with gr.Column(scale=1):
             next_button = gr.Button("下一页 ➡️")
@@ -71,14 +71,16 @@ with gr.Blocks() as demo:
     def prev_click(idx):
         idx = (idx - 1) % 3
         title_text, content_component, run_visible = switch_page(idx)
-        return idx, title_text, content_component, run_button.update(visible=run_visible)
+        content.children = [content_component]  # Directly setting the children
+        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
 
     def next_click(idx):
         idx = (idx + 1) % 3
         title_text, content_component, run_visible = switch_page(idx)
-        return idx, title_text, content_component, run_button.update(visible=run_visible)
+        content.children = [content_component]  # Directly setting the children
+        return idx, title_text, content.update(visible=True), run_button.update(visible=run_visible)
 
-    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content_placeholder, run_button])
-    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content_placeholder, run_button])
-You have unused kwarg parameters in Column, please remove them: {'label': '图片 1', 'source': 'upload'}
+    prev_button.click(fn=prev_click, inputs=page_index, outputs=[page_index, title, content, run_button])
+    next_button.click(fn=next_click, inputs=page_index, outputs=[page_index, title, content, run_button])
+
 demo.launch(server_port=8890)
