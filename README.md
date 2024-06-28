@@ -1,4 +1,4 @@
-2# YOLO-V5 GRADCAM
+# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -57,40 +57,40 @@ def pre_page_func(page_index):
 
 def update_page(page_index):
     if page_index == 0:
-        return gr.update(visible=True), gr.update(visible(False), gr.update(visible=False)
+        return gr.update(visible=True), gr.update(visible=False), gr.update(visible=False)
     elif page_index == 1:
         return gr.update(visible(False), gr.update(visible=True), gr.update(visible(False)
     else:
-        return gr.update(visible=False), gr.update(visible(False), gr.update(visible=True)
+        return gr.update(visible(False), gr.update(visible(False), gr.update(visible(True)
 
 def greet(name, page_index):
-    return f"Hello {name}, you are on page {page_index}!"
+    return f"你好 {name}，你在页面 {page_index}!"
 
-with gr.Blocks() as demo:
+with gr.Blocks(css=".button {height: 300px;} .gradio-image {height: 300px;}") as demo:
     page_index = gr.State(value=0)
 
     with gr.Row():
         with gr.Column(scale=1):
-            prev_button = gr.Button("⬅️ 上一页")
-            next_button = gr.Button("下一页 ➡️")
+            prev_button = gr.Button("⬅️ 上一页", elem_classes="button")
+            next_button = gr.Button("下一页 ➡️", elem_classes="button")
         with gr.Column(scale=8):
-            name = gr.Textbox(label="Name")
-            output = gr.Textbox(label="Output Box")
-            greet_btn = gr.Button("Greet")
+            name = gr.Textbox(label="姓名")
+            output = gr.Textbox(label="输出框")
+            greet_btn = gr.Button("问候")
             greet_btn.click(fn=greet, inputs=[name, page_index], outputs=output)
 
-    # Page content containers
+    # 页面内容容器
     page0 = gr.Column(visible=True)
     with page0:
-        gr.Image(label="Upload Image for Page 0")
+        gr.Image(label="上传图片到页面 0", elem_classes="gradio-image")
         
     page1 = gr.Column(visible=False)
     with page1:
-        gr.Image(label="Upload Image for Page 1")
+        gr.Image(label="上传图片到页面 1", elem_classes="gradio-image")
         
     page2 = gr.Column(visible=False)
     with page2:
-        gr.Textbox(label="Content for Page 2")
+        gr.Textbox(label="页面 2 内容")
 
     prev_button.click(fn=pre_page_func, inputs=page_index, outputs=[page_index, page0, page1, page2])
     next_button.click(fn=next_page_func, inputs=page_index, outputs=[page_index, page0, page1, page2])
