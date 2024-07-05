@@ -66,3 +66,16 @@ image = pipeline(
     controlnet_conditioning_scale=0.9,
     control_guidance_end=0.9,
 ).images[0]
+# 0. Default height and width to unet
+# 1. Check inputs
+# 2. Define call parameters
+# 3. Encode input prompt
+# 4. set timesteps
+# 5. Preprocess mask and image
+# 6. Prepare latent variables
+# 7. Prepare mask latent variables
+# 8. Check that sizes of mask, masked image and latents match
+# 9. Prepare extra step kwargs. TODO: Logic should ideally just be moved out of the pipeline
+# 9.1 Add image embeds for IP-Adapter
+# 9.2 Optionally get Guidance Scale Embedding
+# 10. Denoising loop
