@@ -45,3 +45,24 @@ Solve the custom dataset gradient not match.
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
 ```python
+new_controlnet_image = Image.new("RGBA", control_image.size, "WHITE")
+new_controlnet_image.alpha_composite(control_image)
+pipeline = StableDiffusionXLControlNetPipeline.from_pretrained(
+    "RunDiffusion/Juggernaut-XL-v9",
+    torch_dtype=torch.float16,
+    variant="fp16",
+    controlnet=controlnet,
+).to("cuda")
+
+image = pipeline(
+    prompt=prompt,
+    negative_prompt=negative_prompt,
+    height=1024,
+    width=1024,
+    guidance_scale=6.5,
+    num_inference_steps=25,
+    generator=generator,
+    image=new_controlnet_image,
+    controlnet_conditioning_scale=0.9,
+    control_guidance_end=0.9,
+).images[0]
