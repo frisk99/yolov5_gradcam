@@ -874,4 +874,29 @@ shared.gradio_root.launch(
     allowed_paths=[modules.config.path_outputs],
     blocked_paths=[constants.AUTH_FILENAME]
 )
+import os
+from PIL import Image, ImageOps
 
+def resize_images_to_square_with_padding(input_folder, output_folder):
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+    
+    for filename in os.listdir(input_folder):
+        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
+            image_path = os.path.join(input_folder, filename)
+            with Image.open(image_path) as img:
+                width, height = img.size
+                max_dim = max(width, height)
+                # 创建一个新的白色背景正方形图像
+                new_img = Image.new("RGB", (max_dim, max_dim), (255, 255, 255))
+                # 等比例缩放原图
+                img.thumbnail((max_dim, max_dim), Image.ANTIALIAS)
+                # 将缩放后的原图粘贴到新图像的中心
+                new_img.paste(img, ((max_dim - img.size[0]) // 2, (max_dim - img.size[1]) // 2))
+                # 保存新图像
+                new_img.save(os.path.join(output_folder, filename))
+
+input_folder = 'path/to/input/folder'  # 输入文件夹路径
+output_folder = 'path/to/output/folder'  # 输出文件夹路径
+
+resize_images_to_square_with_padding(input_folder, output_folder)
