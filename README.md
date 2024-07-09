@@ -347,17 +347,27 @@ with shared.gradio_root:
 
             switch_js = "(x) => {if(x){viewer_to_bottom(100);viewer_to_bottom(500);}else{viewer_to_top();} return x;}"
             down_js = "() => {viewer_to_bottom();}"
-
+            def current_tab_change(tab):
+                
+                if tab == 'uov':
+                    return gr.update(visible=True)
+                if tab == 'inpaint':
+                    return gr.update(visible=True)
+                if tab == 'desc':
+                    return gr.update(visible=True)
+                return gr.update(visible=False)
             input_image_checkbox.change(lambda x: gr.update(visible=x), inputs=input_image_checkbox,
                                         outputs=image_input_panel, queue=False, show_progress=False, _js=switch_js)
             ip_advanced.change(lambda: None, queue=False, show_progress=False, _js=down_js)
-
+            test_button = gr.Button("Test Button", visible=True)
             current_tab = gr.Textbox(value='uov', visible=False)
             uov_tab.select(lambda: 'uov', outputs=current_tab, queue=False, _js=down_js, show_progress=False)
             inpaint_tab.select(lambda: 'inpaint', outputs=current_tab, queue=False, _js=down_js, show_progress=False)
             ip_tab.select(lambda: 'ip', outputs=current_tab, queue=False, _js=down_js, show_progress=False)
             desc_tab.select(lambda: 'desc', outputs=current_tab, queue=False, _js=down_js, show_progress=False)
             metadata_tab.select(lambda: 'metadata', outputs=current_tab, queue=False, _js=down_js, show_progress=False)
+            logos_tab.select(lambda: 'logos', outputs=current_tab, queue=False, _js=down_js, show_progress=False)
+            current_tab.change(current_tab_change, inputs=current_tab, outputs=test_button, queue=False, show_progress=False)
 
         with gr.Column(scale=1, visible=modules.config.default_advanced_checkbox) as advanced_column:
             with gr.Tab(label='Setting'):
@@ -874,29 +884,4 @@ shared.gradio_root.launch(
     allowed_paths=[modules.config.path_outputs],
     blocked_paths=[constants.AUTH_FILENAME]
 )
-import os
-from PIL import Image, ImageOps
 
-def resize_images_to_square_with_padding(input_folder, output_folder):
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
-    
-    for filename in os.listdir(input_folder):
-        if filename.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.gif')):
-            image_path = os.path.join(input_folder, filename)
-            with Image.open(image_path) as img:
-                width, height = img.size
-                max_dim = max(width, height)
-                # 创建一个新的白色背景正方形图像
-                new_img = Image.new("RGB", (max_dim, max_dim), (255, 255, 255))
-                # 等比例缩放原图
-                img.thumbnail((max_dim, max_dim), Image.ANTIALIAS)
-                # 将缩放后的原图粘贴到新图像的中心
-                new_img.paste(img, ((max_dim - img.size[0]) // 2, (max_dim - img.size[1]) // 2))
-                # 保存新图像
-                new_img.save(os.path.join(output_folder, filename))
-
-input_folder = 'path/to/input/folder'  # 输入文件夹路径
-output_folder = 'path/to/output/folder'  # 输出文件夹路径
-
-resize_images_to_square_with_padding(input_folder, output_folder)
