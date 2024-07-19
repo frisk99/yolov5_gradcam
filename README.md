@@ -47,3 +47,39 @@ Solve the custom dataset gradient not match.
 ```python
 
 
+import onnx
+import onnxruntime as ort
+from onnx import numpy_helper
+
+# 读取ONNX模型
+model_path = 'your_model_with_external_data.onnx'
+onnx_model = onnx.load(model_path)
+
+# 检查模型
+onnx.checker.check_model(onnx_model)
+
+# 创建ONNX Runtime会话
+ort_session = ort.InferenceSession(model_path)
+
+# 获取输入名称和形状
+input_info = ort_session.get_inputs()
+for input in input_info:
+    print(f"Input name: {input.name}")
+    print(f"Input shape: {input.shape}")
+    print(f"Input type: {input.type}")
+
+# 获取输出名称和形状
+output_info = ort_session.get_outputs()
+for output in output_info:
+    print(f"Output name: {output.name}")
+    print(f"Output shape: {output.shape}")
+    print(f"Output type: {output.type}")
+
+# 读取和打印模型中的初始化参数
+for initializer in onnx_model.graph.initializer:
+    if initializer.HasField('data_location') and initializer.data_location == onnx.TensorProto.EXTERNAL:
+        print(f"Tensor name: {initializer.name} is stored externally.")
+    else:
+        tensor_array = numpy_helper.to_array(initializer)
+        print(f"Tensor name: {initializer.name}")
+        print(tensor_array)
