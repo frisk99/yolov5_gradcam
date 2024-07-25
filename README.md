@@ -44,7 +44,11 @@ Solve the custom dataset gradient not match.
 2. https://github.com/ultralytics/yolov5
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
-```bash
+
+
+
+
+```python
 #!/bin/bash
 
 # 遍历当前文件夹中的所有文件
@@ -55,12 +59,6 @@ for file in bin/pip*; do
     echo "Processed $file"
   fi
 done
-
-
-
-
-```python
-
 
 import onnx
 import onnxruntime as ort
