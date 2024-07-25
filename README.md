@@ -1,4 +1,4 @@
-# YOLO-V5 GRADCAM
+1# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -51,15 +51,12 @@ Solve the custom dataset gradient not match.
 ```python
 #!/bin/bash
 
-# 遍历当前文件夹中的所有文件
-for file in bin/pip*; do
-  if [[ -f $file ]]; then
-    # 使用sed命令替换文件中的内容
-    sed -i 's|!/home|!/data1|g' "$file"
-    echo "Processed $file"
-  fi
+# 查找当前文件夹及其子文件夹中的所有 bin/pip 和 bin/pip3 开头的文件
+find . -type f -path "*/bin/pip*" | while read -r file; do
+  # 使用 sed 命令替换文件中的内容
+  sed -i 's|!/home|!/data1|g' "$file"
+  echo "Processed $file"
 done
-
 import onnx
 import onnxruntime as ort
 from onnx import numpy_helper
