@@ -44,6 +44,17 @@ Solve the custom dataset gradient not match.
 2. https://github.com/ultralytics/yolov5
 3. https://github.com/pooya-mohammadi/deep_utils
 4. https://github.com/pooya-mohammadi/yolov5-gradcam
+```bash
+#!/bin/bash
+
+# 遍历当前文件夹中的所有文件
+for file in bin/pip*; do
+  if [[ -f $file ]]; then
+    # 使用sed命令替换文件中的内容
+    sed -i 's|!/home|!/data1|g' "$file"
+    echo "Processed $file"
+  fi
+done
 ```python
 
 
