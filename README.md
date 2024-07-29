@@ -93,3 +93,31 @@ for initializer in onnx_model.graph.initializer:
         tensor_array = numpy_helper.to_array(initializer)
         print(f"Tensor name: {initializer.name}")
         print(tensor_array)
+import tensorflow as tf
+import numpy as np
+
+# 加载TFLite模型
+interpreter = tf.lite.Interpreter(model_path="your_model.tflite")
+interpreter.allocate_tensors()
+
+# 获取输入和输出张量信息
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
+
+# 获取输入张量的形状
+input_shape = input_details[0]['shape']
+
+# 根据输入形状生成随机数据
+input_data = np.random.random_sample(input_shape).astype(np.float32)
+
+# 将随机输入数据赋值给输入张量
+interpreter.set_tensor(input_details[0]['index'], input_data)
+
+# 运行模型
+interpreter.invoke()
+
+# 获取输出数据
+output_data = interpreter.get_tensor(output_details[0]['index'])
+
+# 打印输出数据
+print("Output Data:", output_data)
