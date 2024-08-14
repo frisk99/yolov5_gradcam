@@ -121,3 +121,44 @@ output_data = interpreter.get_tensor(output_details[0]['index'])
 
 # 打印输出数据
 print("Output Data:", output_data)
+from PIL import Image
+
+def is_close_to_color(color, target_color, threshold):
+    """判断颜色是否接近目标颜色"""
+    return all(abs(c - t) < threshold for c, t in zip(color, target_color))
+
+# 打开图片
+img = Image.open("input.png")
+
+# 将图片转换为RGB模式
+img = img.convert("RGB")
+
+# 获取图片的像素数据
+pixels = img.load()
+
+# 定义接近黑色和白色的阈值
+black_threshold = 50  # 设定接近黑色的阈值
+white_threshold = 50  # 设定接近白色的阈值
+
+# 定义黑色和白色的RGB值
+black_color = (0, 0, 0)
+white_color = (255, 255, 255)
+
+# 获取图片的尺寸
+width, height = img.size
+
+# 遍历图片的每个像素
+for y in range(height):
+    for x in range(width):
+        r, g, b = pixels[x, y]
+        current_color = (r, g, b)
+        
+        # 如果接近黑色，将其变为白色
+        if is_close_to_color(current_color, black_color, black_threshold):
+            pixels[x, y] = white_color
+        # 如果接近白色，将其变为黑色
+        elif is_close_to_color(current_color, white_color, white_threshold):
+            pixels[x, y] = black_color
+
+# 保存转换后的图片
+img.save("output.png")
