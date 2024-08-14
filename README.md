@@ -162,3 +162,31 @@ for y in range(height):
 
 # 保存转换后的图片
 img.save("output.png")
+from PIL import Image
+import numpy as np
+def png_to_rgb(input_png_file, output_rgb_file):
+    img = Image.open(input_png_file)
+    img = img.convert('RGB')
+    img_data = np.array(img)
+    img_data = img_data.astype(np.uint8)
+    with open(output_rgb_file, 'wb') as f:
+        f.write(img_data.tobytes())
+def read_rgb_file(filename, width, height):
+    with open(filename, 'rb') as f:
+        img_data = f.read()
+    img = np.frombuffer(img_data, dtype=np.uint8)
+    img = img.reshape((height, width, 3)) 
+    return img
+
+def rgb_to_png(input_rgb_file, output_png_file, width, height):
+    img = read_rgb_file(input_rgb_file, width, height)
+    img = Image.fromarray(img)
+    img.save(output_png_file)
+
+input_rgb_file = r'man-on-skateboard-cropped.rgb' 
+output_png_file = r'output_file.png'  
+width, height = 512, 512
+
+#rgb_to_png(input_rgb_file, output_png_file, width, height)
+png_to_rgb('000009.jpg','000009.rgb')
+rgb_to_png('000009.rgb', '000009-1.jpg', 256, 256)
