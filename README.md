@@ -250,10 +250,14 @@ def enlarge_white_ellipse(img, scale_factor):
             
             # 放大椭圆的长短轴
             center, axes, angle = ellipse
-            axes = (int(axes[0] * scale_factor), int(axes[1] * scale_factor))
             
-            # 在空白图像上绘制放大后的椭圆
-            cv2.ellipse(result, (center, axes, angle), 255, thickness=cv2.FILLED)
+            # 检查拟合出的轴是否有效
+            if axes[0] > 0 and axes[1] > 0 and np.isfinite(axes[0]) and np.isfinite(axes[1]):
+                axes = (int(axes[0] * scale_factor), int(axes[1] * scale_factor))
+                # 在空白图像上绘制放大后的椭圆
+                cv2.ellipse(result, (center, axes, angle), 255, thickness=cv2.FILLED)
+            else:
+                print(f"Skipping invalid contour with axes: {axes}")
 
     return result
 
@@ -284,3 +288,4 @@ output_folder = 'path_to_output_folder'  # 输出文件夹路径
 scale_factor = 1.5  # 放大系数
 
 process_images_in_folder(input_folder, output_folder, scale_factor)
+
