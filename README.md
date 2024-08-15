@@ -232,3 +232,55 @@ for image_name in os.listdir(image_folder):
             print(f"Saved inpainted image to {output_path}")
         else:
             print(f"Mask not found for image: {image_name}")
+import cv2
+import numpy as np
+import os
+
+def enlarge_white_ellipse(img, scale_factor):
+    # 查找白色区域的轮廓
+    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+    # 创建一个空白图像，大小与原图一致
+    result = np.zeros_like(img)
+
+    for contour in contours:
+        # 拟合轮廓为椭圆
+        if contour.shape[0] >= 5:  # 拟合椭圆要求至少有5个点
+            ellipse = cv2.fitEllipse(contour)
+            
+            # 放大椭圆的长短轴
+            center, axes, angle = ellipse
+            axes = (int(axes[0] * scale_factor), int(axes[1] * scale_factor))
+            
+            # 在空白图像上绘制放大后的椭圆
+            cv2.ellipse(result, (center, axes, angle), 255, thickness=cv2.FILLED)
+
+    return result
+
+def process_images_in_folder(input_folder, output_folder, scale_factor):
+    # 确保输出文件夹存在
+    if not os.path.exists(output_folder):
+        os.makedirs(output_folder)
+
+    # 获取输入文件夹中的所有文件
+    for filename in os.listdir(input_folder):
+        if filename.endswith('.png') or filename.endswith('.jpg') or filename.endswith('.jpeg'):
+            input_path = os.path.join(input_folder, filename)
+            output_path = os.path.join(output_folder, filename)
+            
+            # 读取图像
+            img = cv2.imread(input_path, cv2.IMREAD_GRAYSCALE)
+            
+            # 放大白色椭圆区域
+            enlarged_img = enlarge_white_ellipse(img, scale_factor)
+            
+            # 保存结果
+            cv2.imwrite(output_path, enlarged_img)
+            print(f'Processed and saved: {output_path}')
+
+# 使用示例
+input_folder = 'path_to_input_folder'  # 输入文件夹路径
+output_folder = 'path_to_output_folder'  # 输出文件夹路径
+scale_factor = 1.5  # 放大系数
+
+process_images_in_folder(input_folder, output_folder, scale_factor)
