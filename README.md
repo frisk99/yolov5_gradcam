@@ -190,3 +190,45 @@ width, height = 512, 512
 #rgb_to_png(input_rgb_file, output_png_file, width, height)
 png_to_rgb('000009.jpg','000009.rgb')
 rgb_to_png('000009.rgb', '000009-1.jpg', 256, 256)
+import os
+import PIL
+import requests
+import torch
+from io import BytesIO
+from diffusers import AutoPipelineForInpainting,AutoPipelineForText2Image
+from transformers import T5Model, T5Tokenizer
+# Define folders
+image_folder = r"G:\train_control\celeba_hq\train\female"
+mask_folder = r"G:\train_control\celeba_hq\train\female_masks"
+output_folder = r"G:\train_control\celeba_hq\train\female_close"
+
+# Load images and masks
+def load_image(image_path):
+    return PIL.Image.open(image_path).convert("RGB")
+
+# Initialize the pipeline
+pipe_pre = AutoPipelineForText2Image.from_pretrained(
+    "G:\huggingface\Juggernaut-XL-v8", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
+).to("cuda")
+
+prompt = "A person sleeping"
+pipe = AutoPipelineForInpainting.from_pipe(pipe_pre).to("cuda")
+# Ensure output folder exists
+os.makedirs(output_folder, exist_ok=True)
+
+# Process each pair of image and mask
+for image_name in os.listdir(image_folder):
+    if image_name.endswith((".png", ".jpg", ".jpeg")):
+        image_path = os.path.join(image_folder, image_name)
+        mask_path = os.path.join(mask_folder, image_name) 
+
+        if os.path.exists(mask_path):
+            init_image = load_image(image_path).resize((512, 512))
+            mask_image = load_image(mask_path).resize((512, 512))
+            image = pipe(prompt=prompt, image=init_image, mask_image=mask_image).images[0]
+            output_path = os.path.join(output_folder, f"inpainted_{image_name}")
+            image.save(output_path)
+
+            print(f"Saved inpainted image to {output_path}")
+        else:
+            print(f"Mask not found for image: {image_name}")
