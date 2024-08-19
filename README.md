@@ -1,4 +1,4 @@
-1# YOLO-V5 GRADCAM
+# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -289,3 +289,6 @@ scale_factor = 1.5  # 放大系数
 
 process_images_in_folder(input_folder, output_folder, scale_factor)
 
+参加AI相关的入职培训让我对人工智能技术及其在实际应用中的广泛前景有了更深入的理解。这次培训涵盖了AI的基础知识，包括机器学习、深度学习、自然语言处理等核心概念，同时还深入探讨了AI模型的训练与优化流程。通过培训，我了解了如何有效利用开源工具和框架，如TensorFlow和PyTorch，来构建和部署AI模型。此外，培训中强调了数据的重要性，介绍了数据清洗、特征工程以及如何构建高质量的数据集以提高模型的准确性和泛化能力。
+
+在实际操作部分，我们学习了如何从零开始构建AI应用，从数据预处理、模型训练到最终的模型部署。我还对AI模型在云端的部署、管理和优化有了初步的掌握，这为今后的实际开发工作奠定了基础。通过这次培训，我不仅巩固了AI的理论知识，还提升了实际操作技能，更重要的是，我开始认识到AI技术的潜力以及在解决现实世界问题中的重要性。未来，我将继续深入学习AI相关的技术，争取在工作中将其应用到更多的项目中，推动业务创新和效率提升。
