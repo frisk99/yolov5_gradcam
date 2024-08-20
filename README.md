@@ -232,63 +232,31 @@ for image_name in os.listdir(image_folder):
             print(f"Saved inpainted image to {output_path}")
         else:
             print(f"Mask not found for image: {image_name}")
-import cv2
-import numpy as np
-import os
+import torch
 
-def enlarge_white_ellipse(img, scale_factor):
-    # 查找白色区域的轮廓
-    contours, _ = cv2.findContours(img, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+# 固定随机数种子
+torch.manual_seed(42)
 
-    # 创建一个空白图像，大小与原图一致
-    result = np.zeros_like(img)
+# 读取文件中的数据
+input_file = 'input.txt'
+output_file = 'output.txt'
 
-    for contour in contours:
-        # 拟合轮廓为椭圆
-        if contour.shape[0] >= 5:  # 拟合椭圆要求至少有5个点
-            ellipse = cv2.fitEllipse(contour)
-            
-            # 放大椭圆的长短轴
-            center, axes, angle = ellipse
-            
-            # 检查拟合出的轴是否有效
-            if axes[0] > 0 and axes[1] > 0 and np.isfinite(axes[0]) and np.isfinite(axes[1]):
-                axes = (int(axes[0] * scale_factor), int(axes[1] * scale_factor))
-                # 在空白图像上绘制放大后的椭圆
-                cv2.ellipse(result, (center, axes, angle), 255, thickness=cv2.FILLED)
-            else:
-                print(f"Skipping invalid contour with axes: {axes}")
+with open(input_file, 'r') as file:
+    # 读取整行数据并转换为浮点数列表
+    line = file.readline()
+    numbers = list(map(float, line.split()))
 
-    return result
+# 使用torch生成随机浮点数
+random_numbers = torch.rand(len(numbers))
 
-def process_images_in_folder(input_folder, output_folder, scale_factor):
-    # 确保输出文件夹存在
-    if not os.path.exists(output_folder):
-        os.makedirs(output_folder)
+# 计算差值
+differences = [num - rand_num for num, rand_num in zip(numbers, random_numbers)]
 
-    # 获取输入文件夹中的所有文件
-    for filename in os.listdir(input_folder):
-        if filename.endswith('.png') or filename.endswith('.jpg') or filename.endswith('.jpeg'):
-            input_path = os.path.join(input_folder, filename)
-            output_path = os.path.join(output_folder, filename)
-            
-            # 读取图像
-            img = cv2.imread(input_path, cv2.IMREAD_GRAYSCALE)
-            
-            # 放大白色椭圆区域
-            enlarged_img = enlarge_white_ellipse(img, scale_factor)
-            
-            # 保存结果
-            cv2.imwrite(output_path, enlarged_img)
-            print(f'Processed and saved: {output_path}')
+# 将差值转换为字符串，并拼接成一行文本
+output_line = ' '.join(map(str, differences))
 
-# 使用示例
-input_folder = 'path_to_input_folder'  # 输入文件夹路径
-output_folder = 'path_to_output_folder'  # 输出文件夹路径
-scale_factor = 1.5  # 放大系数
+# 将结果写入输出文件
+with open(output_file, 'w') as file:
+    file.write(output_line)
 
-process_images_in_folder(input_folder, output_folder, scale_factor)
-
-参加AI相关的入职培训让我对人工智能技术及其在实际应用中的广泛前景有了更深入的理解。这次培训涵盖了AI的基础知识，包括机器学习、深度学习、自然语言处理等核心概念，同时还深入探讨了AI模型的训练与优化流程。通过培训，我了解了如何有效利用开源工具和框架，如TensorFlow和PyTorch，来构建和部署AI模型。此外，培训中强调了数据的重要性，介绍了数据清洗、特征工程以及如何构建高质量的数据集以提高模型的准确性和泛化能力。
-
-在实际操作部分，我们学习了如何从零开始构建AI应用，从数据预处理、模型训练到最终的模型部署。我还对AI模型在云端的部署、管理和优化有了初步的掌握，这为今后的实际开发工作奠定了基础。通过这次培训，我不仅巩固了AI的理论知识，还提升了实际操作技能，更重要的是，我开始认识到AI技术的潜力以及在解决现实世界问题中的重要性。未来，我将继续深入学习AI相关的技术，争取在工作中将其应用到更多的项目中，推动业务创新和效率提升。
+print("处理完成，结果已保存到", output_file)
