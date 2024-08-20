@@ -260,3 +260,72 @@ with open(output_file, 'w') as file:
     file.write(output_line)
 
 print("处理完成，结果已保存到", output_file)
+import tensorflow as tf
+import keras_cv
+from tensorflow import keras
+import numpy as np
+
+# Load the pipeline and get models
+model = keras_cv.models.StableDiffusionV2(img_width=512, img_height=512)
+text_encoder_model = model.text_encoder
+decoder_model = model.decoder
+diffusion_model = model.diffusion_model
+image_encoder_model = model.image_encoder
+
+def compare_models(keras_model, tflite_model_path, input_data):
+    keras_output = keras_model(input_data).numpy()
+    interpreter = tf.lite.Interpreter(model_path=tflite_model_path)
+    interpreter.allocate_tensors()
+    input_details = interpreter.get_input_details()
+    output_details = interpreter.get_output_details()
+
+    # 打印输入张量的详细信息
+    print('###################################')
+    for i, input_detail in enumerate(input_details):
+        print(f"Input {i}:")
+        print(f"  Name: {input_detail['name']}")
+        print(f"  Shape: {input_detail['shape']}")
+        print(f"  Data Type: {input_detail['dtype']}")
+
+    # 设置输入张量
+    if isinstance(input_data, (list, tuple)):
+        for i, data in enumerate(input_data):
+            interpreter.set_tensor(input_details[i]['index'], data)
+    else:
+        interpreter.set_tensor(input_details[0]['index'], input_data)
+
+    interpreter.invoke()
+    tflite_output = interpreter.get_tensor(output_details[0]['index'])
+    difference = np.mean(np.abs((keras_output - tflite_output) / keras_output)) * 100
+    return difference
+
+def generate_random_inputs():
+    text_encoder_input = [np.random.random((1, 77)).astype(np.int32) for _ in range(2)]
+    diffusion_input = [
+        np.random.normal(loc=0.0, scale=1.0, size=(1, 64, 64, 4)).astype(np.float32),
+        np.random.normal(loc=0.0, scale=1.0, size=(1, 320)).astype(np.float32),
+        np.random.normal(loc=0.0, scale=1.0, size=(1, 77, 1024)).astype(np.float32)
+    ]
+    decoder_input = np.random.normal(loc=0.0, scale=1.0, size=(1, 64, 64, 4)).astype(np.float32)
+    image_encoder_input = np.random.normal(loc=0.0, scale=1.0, size=(1, 512, 512, 3)).astype(np.float32)
+
+    return text_encoder_input, diffusion_input, decoder_input, image_encoder_input
+
+cnt = 12
+text_encoder_difference = 0
+diffusion_difference = 0
+decoder_difference = 0
+image_encoder_difference = 0
+
+for _ in range(cnt):
+    text_encoder_input, diffusion_input, decoder_input, image_encoder_input = generate_random_inputs()
+
+    text_encoder_difference += compare_models(text_encoder_model, './tmp512/sd2_text_encoder_dynamic.tflite', text_encoder_input)
+    diffusion_difference += compare_models(diffusion_model, './tmp512/sd2_diffusion_model_dynamic.tflite', diffusion_input)
+    decoder_difference += compare_models(decoder_model, './tmp512/sd2_decoder_dynamic.tflite', decoder_input)
+    image_encoder_difference += compare_models(image_encoder_model, './tmp512/sd2_image_encoder_dynamic.tflite', image_encoder_input)
+
+print(f"Text Encoder 模型差异: {text_encoder_difference / cnt:.2f}%")
+print(f"Diffusion 模型差异: {diffusion_difference / cnt:.2f}%")
+print(f"Decoder 模型差异: {decoder_difference / cnt:.2f}%")
+print(f"Image Encoder 模型差异: {image_encoder_difference / cnt:.2f}%")
