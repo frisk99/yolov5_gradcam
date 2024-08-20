@@ -312,20 +312,28 @@ def generate_random_inputs():
     return text_encoder_input, diffusion_input, decoder_input, image_encoder_input
 
 cnt = 12
-text_encoder_difference = 0
-diffusion_difference = 0
-decoder_difference = 0
-image_encoder_difference = 0
+text_encoder_differences = []
+diffusion_differences = []
+decoder_differences = []
+image_encoder_differences = []
 
 for _ in range(cnt):
     text_encoder_input, diffusion_input, decoder_input, image_encoder_input = generate_random_inputs()
 
-    text_encoder_difference += compare_models(text_encoder_model, './tmp512/sd2_text_encoder_dynamic.tflite', text_encoder_input)
-    diffusion_difference += compare_models(diffusion_model, './tmp512/sd2_diffusion_model_dynamic.tflite', diffusion_input)
-    decoder_difference += compare_models(decoder_model, './tmp512/sd2_decoder_dynamic.tflite', decoder_input)
-    image_encoder_difference += compare_models(image_encoder_model, './tmp512/sd2_image_encoder_dynamic.tflite', image_encoder_input)
+    text_encoder_differences.append(compare_models(text_encoder_model, './tmp512/sd2_text_encoder_dynamic.tflite', text_encoder_input))
+    diffusion_differences.append(compare_models(diffusion_model, './tmp512/sd2_diffusion_model_dynamic.tflite', diffusion_input))
+    decoder_differences.append(compare_models(decoder_model, './tmp512/sd2_decoder_dynamic.tflite', decoder_input))
+    image_encoder_differences.append(compare_models(image_encoder_model, './tmp512/sd2_image_encoder_dynamic.tflite', image_encoder_input))
 
-print(f"Text Encoder 模型差异: {text_encoder_difference / cnt:.2f}%")
-print(f"Diffusion 模型差异: {diffusion_difference / cnt:.2f}%")
+# 计算并打印平均差异
+print(text_encoder_differences)
+print(f"Text Encoder 模型差异: {np.mean(text_encoder_differences):.2f}%")
+print(diffusion_differences)
+print(f"Diffusion 模型差异: {np.mean(diffusion_differences):.2f}%")
+print(decoder_differences)
+print(f"Decoder 模型差异: {np.mean(decoder_differences):.2f}%")
+print(image_encoder_differences)
+print(f"Image Encoder 模型差异: {np.mean(image_encoder_differences):.2f}%")
+
 print(f"Decoder 模型差异: {decoder_difference / cnt:.2f}%")
 print(f"Image Encoder 模型差异: {image_encoder_difference / cnt:.2f}%")
