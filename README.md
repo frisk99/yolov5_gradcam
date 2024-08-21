@@ -61,16 +61,20 @@ import os
 import keras_cv
 import numpy as np
 import tensorflow as tf
-from PIL import Image, ImageDraw
+from PIL import Image
 import matplotlib.pyplot as plt
 from tensorflow import keras
 
 # Initialize the Stable Diffusion model
 stable_diffusion = keras_cv.models.StableDiffusion()
 
-# Set the image and mask directories
+# Set the image, mask, and output directories
 image_folder = 'path_to_image_folder'
 mask_folder = 'path_to_mask_folder'
+output_folder = 'path_to_output_folder'
+
+# Create the output folder if it doesn't exist
+os.makedirs(output_folder, exist_ok=True)
 
 # Function to resize image and mask
 def resize_image_and_mask(image, mask, size=(512, 512)):
@@ -80,8 +84,8 @@ def resize_image_and_mask(image, mask, size=(512, 512)):
     mask = np.array(mask)
     return image, mask
 
-# Function to perform inpainting and plot results
-def inpaint_and_plot(image, mask, prompt):
+# Function to perform inpainting, plot results, and save the image
+def inpaint_and_save(image, mask, prompt, output_path):
     mask = np.where(mask == 0, 1, 0)  # Inverting the mask
     image = np.expand_dims(image, axis=0)
     mask = np.expand_dims(mask, axis=0)
@@ -92,10 +96,10 @@ def inpaint_and_plot(image, mask, prompt):
         mask=mask,
     )
 
-    # Plot the result
-    plt.imshow(generated[0])
-    plt.axis('off')
-    plt.show()
+    # Convert the generated image to PIL format and save it
+    generated_image = Image.fromarray((generated[0] * 255).astype(np.uint8))
+    generated_image.save(output_path)
+    print(f"Saved inpainted image to {output_path}")
 
 # Loop through the images and masks
 for filename in os.listdir(image_folder):
@@ -110,7 +114,10 @@ for filename in os.listdir(image_folder):
         # Resize image and mask
         image, mask = resize_image_and_mask(image, mask)
 
-        # Perform inpainting and plot the results
-        inpaint_and_plot(image, mask, prompt="pig on cart")
+        # Define the output file path
+        output_path = os.path.join(output_folder, filename)
+
+        # Perform inpainting and save the results
+        inpaint_and_save(image, mask, prompt="glancing at something", output_path=output_path)
 
 
