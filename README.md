@@ -57,283 +57,60 @@ find . -type f -path "*/bin/pip*" | while read -r file; do
   sed -i 's|!/home|!/data1|g' "$file"
   echo "Processed $file"
 done
-import onnx
-import onnxruntime as ort
-from onnx import numpy_helper
-
-# 读取ONNX模型
-model_path = 'your_model_with_external_data.onnx'
-onnx_model = onnx.load(model_path)
-
-# 检查模型
-onnx.checker.check_model(onnx_model)
-
-# 创建ONNX Runtime会话
-ort_session = ort.InferenceSession(model_path)
-
-# 获取输入名称和形状
-input_info = ort_session.get_inputs()
-for input in input_info:
-    print(f"Input name: {input.name}")
-    print(f"Input shape: {input.shape}")
-    print(f"Input type: {input.type}")
-
-# 获取输出名称和形状
-output_info = ort_session.get_outputs()
-for output in output_info:
-    print(f"Output name: {output.name}")
-    print(f"Output shape: {output.shape}")
-    print(f"Output type: {output.type}")
-
-# 读取和打印模型中的初始化参数
-for initializer in onnx_model.graph.initializer:
-    if initializer.HasField('data_location') and initializer.data_location == onnx.TensorProto.EXTERNAL:
-        print(f"Tensor name: {initializer.name} is stored externally.")
-    else:
-        tensor_array = numpy_helper.to_array(initializer)
-        print(f"Tensor name: {initializer.name}")
-        print(tensor_array)
-import tensorflow as tf
-import numpy as np
-
-# 加载TFLite模型
-interpreter = tf.lite.Interpreter(model_path="your_model.tflite")
-interpreter.allocate_tensors()
-
-# 获取输入和输出张量信息
-input_details = interpreter.get_input_details()
-output_details = interpreter.get_output_details()
-
-# 获取输入张量的形状
-input_shape = input_details[0]['shape']
-
-# 根据输入形状生成随机数据
-input_data = np.random.random_sample(input_shape).astype(np.float32)
-
-# 将随机输入数据赋值给输入张量
-interpreter.set_tensor(input_details[0]['index'], input_data)
-
-# 运行模型
-interpreter.invoke()
-
-# 获取输出数据
-output_data = interpreter.get_tensor(output_details[0]['index'])
-
-# 打印输出数据
-print("Output Data:", output_data)
-from PIL import Image
-
-def is_close_to_color(color, target_color, threshold):
-    """判断颜色是否接近目标颜色"""
-    return all(abs(c - t) < threshold for c, t in zip(color, target_color))
-
-# 打开图片
-img = Image.open("input.png")
-
-# 将图片转换为RGB模式
-img = img.convert("RGB")
-
-# 获取图片的像素数据
-pixels = img.load()
-
-# 定义接近黑色和白色的阈值
-black_threshold = 50  # 设定接近黑色的阈值
-white_threshold = 50  # 设定接近白色的阈值
-
-# 定义黑色和白色的RGB值
-black_color = (0, 0, 0)
-white_color = (255, 255, 255)
-
-# 获取图片的尺寸
-width, height = img.size
-
-# 遍历图片的每个像素
-for y in range(height):
-    for x in range(width):
-        r, g, b = pixels[x, y]
-        current_color = (r, g, b)
-        
-        # 如果接近黑色，将其变为白色
-        if is_close_to_color(current_color, black_color, black_threshold):
-            pixels[x, y] = white_color
-        # 如果接近白色，将其变为黑色
-        elif is_close_to_color(current_color, white_color, white_threshold):
-            pixels[x, y] = black_color
-
-# 保存转换后的图片
-img.save("output.png")
-from PIL import Image
-import numpy as np
-def png_to_rgb(input_png_file, output_rgb_file):
-    img = Image.open(input_png_file)
-    img = img.convert('RGB')
-    img_data = np.array(img)
-    img_data = img_data.astype(np.uint8)
-    with open(output_rgb_file, 'wb') as f:
-        f.write(img_data.tobytes())
-def read_rgb_file(filename, width, height):
-    with open(filename, 'rb') as f:
-        img_data = f.read()
-    img = np.frombuffer(img_data, dtype=np.uint8)
-    img = img.reshape((height, width, 3)) 
-    return img
-
-def rgb_to_png(input_rgb_file, output_png_file, width, height):
-    img = read_rgb_file(input_rgb_file, width, height)
-    img = Image.fromarray(img)
-    img.save(output_png_file)
-
-input_rgb_file = r'man-on-skateboard-cropped.rgb' 
-output_png_file = r'output_file.png'  
-width, height = 512, 512
-
-#rgb_to_png(input_rgb_file, output_png_file, width, height)
-png_to_rgb('000009.jpg','000009.rgb')
-rgb_to_png('000009.rgb', '000009-1.jpg', 256, 256)
 import os
-import PIL
-import requests
-import torch
-from io import BytesIO
-from diffusers import AutoPipelineForInpainting,AutoPipelineForText2Image
-from transformers import T5Model, T5Tokenizer
-# Define folders
-image_folder = r"G:\train_control\celeba_hq\train\female"
-mask_folder = r"G:\train_control\celeba_hq\train\female_masks"
-output_folder = r"G:\train_control\celeba_hq\train\female_close"
-
-# Load images and masks
-def load_image(image_path):
-    return PIL.Image.open(image_path).convert("RGB")
-
-# Initialize the pipeline
-pipe_pre = AutoPipelineForText2Image.from_pretrained(
-    "G:\huggingface\Juggernaut-XL-v8", torch_dtype=torch.float16, variant="fp16", use_safetensors=True
-).to("cuda")
-
-prompt = "A person sleeping"
-pipe = AutoPipelineForInpainting.from_pipe(pipe_pre).to("cuda")
-# Ensure output folder exists
-os.makedirs(output_folder, exist_ok=True)
-
-# Process each pair of image and mask
-for image_name in os.listdir(image_folder):
-    if image_name.endswith((".png", ".jpg", ".jpeg")):
-        image_path = os.path.join(image_folder, image_name)
-        mask_path = os.path.join(mask_folder, image_name) 
-
-        if os.path.exists(mask_path):
-            init_image = load_image(image_path).resize((512, 512))
-            mask_image = load_image(mask_path).resize((512, 512))
-            image = pipe(prompt=prompt, image=init_image, mask_image=mask_image).images[0]
-            output_path = os.path.join(output_folder, f"inpainted_{image_name}")
-            image.save(output_path)
-
-            print(f"Saved inpainted image to {output_path}")
-        else:
-            print(f"Mask not found for image: {image_name}")
-import torch
-
-# 固定随机数种子
-torch.manual_seed(42)
-
-# 读取文件中的数据
-input_file = 'input.txt'
-output_file = 'output.txt'
-
-with open(input_file, 'r') as file:
-    # 读取整行数据并转换为浮点数列表
-    line = file.readline()
-    numbers = list(map(float, line.split()))
-
-# 使用torch生成随机浮点数
-random_numbers = torch.rand(len(numbers))
-
-# 计算差值
-differences = [num - rand_num for num, rand_num in zip(numbers, random_numbers)]
-
-# 将差值转换为字符串，并拼接成一行文本
-output_line = ' '.join(map(str, differences))
-
-# 将结果写入输出文件
-with open(output_file, 'w') as file:
-    file.write(output_line)
-
-print("处理完成，结果已保存到", output_file)
-import tensorflow as tf
 import keras_cv
-from tensorflow import keras
 import numpy as np
+import tensorflow as tf
+from PIL import Image, ImageDraw
+import matplotlib.pyplot as plt
+from tensorflow import keras
 
-# Load the pipeline and get models
-model = keras_cv.models.StableDiffusionV2(img_width=512, img_height=512)
-text_encoder_model = model.text_encoder
-decoder_model = model.decoder
-diffusion_model = model.diffusion_model
-image_encoder_model = model.image_encoder
+# Initialize the Stable Diffusion model
+stable_diffusion = keras_cv.models.StableDiffusion()
 
-def compare_models(keras_model, tflite_model_path, input_data):
-    keras_output = keras_model(input_data).numpy()
-    interpreter = tf.lite.Interpreter(model_path=tflite_model_path)
-    interpreter.allocate_tensors()
-    input_details = interpreter.get_input_details()
-    output_details = interpreter.get_output_details()
+# Set the image and mask directories
+image_folder = 'path_to_image_folder'
+mask_folder = 'path_to_mask_folder'
 
-    # 打印输入张量的详细信息
-    print('###################################')
-    for i, input_detail in enumerate(input_details):
-        print(f"Input {i}:")
-        print(f"  Name: {input_detail['name']}")
-        print(f"  Shape: {input_detail['shape']}")
-        print(f"  Data Type: {input_detail['dtype']}")
+# Function to resize image and mask
+def resize_image_and_mask(image, mask, size=(512, 512)):
+    image = image.resize(size)
+    mask = mask.resize(size)
+    image = np.array(image)
+    mask = np.array(mask)
+    return image, mask
 
-    # 设置输入张量
-    if isinstance(input_data, (list, tuple)):
-        for i, data in enumerate(input_data):
-            interpreter.set_tensor(input_details[i]['index'], data)
-    else:
-        interpreter.set_tensor(input_details[0]['index'], input_data)
+# Function to perform inpainting and plot results
+def inpaint_and_plot(image, mask, prompt):
+    mask = np.where(mask == 0, 1, 0)  # Inverting the mask
+    image = np.expand_dims(image, axis=0)
+    mask = np.expand_dims(mask, axis=0)
 
-    interpreter.invoke()
-    tflite_output = interpreter.get_tensor(output_details[0]['index'])
-    difference = np.mean(np.abs((keras_output - tflite_output) / keras_output)) * 100
-    return difference
+    generated = stable_diffusion.inpaint(
+        prompt,
+        image=image,
+        mask=mask,
+    )
 
-def generate_random_inputs():
-    text_encoder_input = [np.random.random((1, 77)).astype(np.int32) for _ in range(2)]
-    diffusion_input = [
-        np.random.normal(loc=0.0, scale=1.0, size=(1, 64, 64, 4)).astype(np.float32),
-        np.random.normal(loc=0.0, scale=1.0, size=(1, 320)).astype(np.float32),
-        np.random.normal(loc=0.0, scale=1.0, size=(1, 77, 1024)).astype(np.float32)
-    ]
-    decoder_input = np.random.normal(loc=0.0, scale=1.0, size=(1, 64, 64, 4)).astype(np.float32)
-    image_encoder_input = np.random.normal(loc=0.0, scale=1.0, size=(1, 512, 512, 3)).astype(np.float32)
+    # Plot the result
+    plt.imshow(generated[0])
+    plt.axis('off')
+    plt.show()
 
-    return text_encoder_input, diffusion_input, decoder_input, image_encoder_input
+# Loop through the images and masks
+for filename in os.listdir(image_folder):
+    if filename.endswith(".png") or filename.endswith(".jpg"):
+        image_path = os.path.join(image_folder, filename)
+        mask_path = os.path.join(mask_folder, filename)  # Assuming masks have the same name as images
 
-cnt = 12
-text_encoder_differences = []
-diffusion_differences = []
-decoder_differences = []
-image_encoder_differences = []
+        # Load the image and mask
+        image = Image.open(image_path)
+        mask = Image.open(mask_path).convert("L")  # Convert mask to grayscale
 
-for _ in range(cnt):
-    text_encoder_input, diffusion_input, decoder_input, image_encoder_input = generate_random_inputs()
+        # Resize image and mask
+        image, mask = resize_image_and_mask(image, mask)
 
-    text_encoder_differences.append(compare_models(text_encoder_model, './tmp512/sd2_text_encoder_dynamic.tflite', text_encoder_input))
-    diffusion_differences.append(compare_models(diffusion_model, './tmp512/sd2_diffusion_model_dynamic.tflite', diffusion_input))
-    decoder_differences.append(compare_models(decoder_model, './tmp512/sd2_decoder_dynamic.tflite', decoder_input))
-    image_encoder_differences.append(compare_models(image_encoder_model, './tmp512/sd2_image_encoder_dynamic.tflite', image_encoder_input))
+        # Perform inpainting and plot the results
+        inpaint_and_plot(image, mask, prompt="pig on cart")
 
-# 计算并打印平均差异
-print(text_encoder_differences)
-print(f"Text Encoder 模型差异: {np.mean(text_encoder_differences):.2f}%")
-print(diffusion_differences)
-print(f"Diffusion 模型差异: {np.mean(diffusion_differences):.2f}%")
-print(decoder_differences)
-print(f"Decoder 模型差异: {np.mean(decoder_differences):.2f}%")
-print(image_encoder_differences)
-print(f"Image Encoder 模型差异: {np.mean(image_encoder_differences):.2f}%")
 
-print(f"Decoder 模型差异: {decoder_difference / cnt:.2f}%")
-print(f"Image Encoder 模型差异: {image_encoder_difference / cnt:.2f}%")
