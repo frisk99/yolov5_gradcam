@@ -120,4 +120,19 @@ for filename in os.listdir(image_folder):
         # Perform inpainting and save the results
         inpaint_and_save(image, mask, prompt="glancing at something", output_path=output_path)
 
+import gradio as gr
+import imageio
 
+def dummy(img):
+  imageio.imwrite("output_image.png", img["mask"])
+  return img["image"], img["mask"]
+
+with gr.Blocks() as demo:
+  with gr.Row():
+    img = gr.Image(tool="sketch", label="base image", show_label=True)
+    img1 = gr.Image()
+    img2 = gr.Image(label="mask image", show_label=True)
+  btn = gr.Button()
+  btn.click(dummy, img, [img1, img2])
+
+demo.launch(debug=True)
