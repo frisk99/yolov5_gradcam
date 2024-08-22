@@ -136,3 +136,94 @@ with gr.Blocks() as demo:
   btn.click(dummy, img, [img1, img2])
 
 demo.launch(debug=True)
+import numpy as np
+import onnxruntime as ort
+import torch
+import argparse
+from pathlib import Path
+from diffusers import StableDiffusionPipeline
+
+def compare_outputs(torch_output, onnx_output):
+    # Convert Torch output to numpy array
+    torch_output = torch_output.detach().cpu().numpy()
+    
+    # Ensure the outputs have the same shape
+    assert torch_output.shape == onnx_output.shape, f"Shape mismatch: {torch_output.shape} vs {onnx_output.shape}"
+
+    # Calculate the relative error
+    relative_error = np.mean(np.abs(torch_output - onnx_output) / np.maximum(np.abs(torch_output), np.abs(onnx_output)))
+    return relative_error
+
+@torch.no_grad()
+def test_model_precision(model_path: str, onnx_path: str, fp16: bool = False):
+    dtype = torch.float16 if fp16 else torch.float32
+    device = "cuda" if fp16 and torch.cuda.is_available() else "cpu"
+    
+    # Load the pipeline
+    pipeline = StableDiffusionPipeline.from_pretrained(model_path, torch_dtype=dtype).to(device)
+
+    # --- UNET ---
+    sample_input = torch.randn(1, pipeline.unet.config.in_channels, pipeline.unet.config.sample_size, pipeline.unet.config.sample_size).to(device)
+    torch_unet_output = pipeline.unet(sample_input, torch.tensor([1.0]).to(device), torch.randn(1, 77, 768).to(device))[0]
+    
+    ort_unet_session = ort.InferenceSession(str(Path(onnx_path) / "unet" / "model.onnx"))
+    ort_unet_inputs = {
+        "sample": sample_input.cpu().numpy(),
+        "timestep": np.array([1.0]),
+        "encoder_hidden_states": np.random.randn(1, 77, 768).astype(np.float32)
+    }
+    onnx_unet_output = ort_unet_session.run(None, ort_unet_inputs)[0]
+    
+    unet_error = compare_outputs(torch_unet_output, onnx_unet_output)
+    print(f"Relative error between Torch and ONNX UNet outputs: {unet_error}")
+    
+    # --- TEXT ENCODER ---
+    text_input = pipeline.tokenizer(
+        "A sample prompt",
+        padding="max_length",
+        max_length=pipeline.tokenizer.model_max_length,
+        truncation=True,
+        return_tensors="pt",
+    ).to(device)
+    
+    torch_text_output = pipeline.text_encoder(text_input.input_ids)[0]
+    
+    ort_text_session = ort.InferenceSession(str(Path(onnx_path) / "text_encoder" / "model.onnx"))
+    ort_text_inputs = {"input_ids": text_input.input_ids.cpu().numpy()}
+    onnx_text_output = ort_text_session.run(None, ort_text_inputs)[0]
+    
+    text_error = compare_outputs(torch_text_output, onnx_text_output)
+    print(f"Relative error between Torch and ONNX Text Encoder outputs: {text_error}")
+
+    # --- VAE ENCODER ---
+    vae_input = torch.randn(1, pipeline.vae.config.in_channels, pipeline.vae.config.sample_size, pipeline.vae.config.sample_size).to(device)
+    torch_vae_encoder_output = pipeline.vae.encode(vae_input)[0].sample()
+    
+    ort_vae_encoder_session = ort.InferenceSession(str(Path(onnx_path) / "vae_encoder" / "model.onnx"))
+    ort_vae_encoder_inputs = {"sample": vae_input.cpu().numpy()}
+    onnx_vae_encoder_output = ort_vae_encoder_session.run(None, ort_vae_encoder_inputs)[0]
+    
+    vae_encoder_error = compare_outputs(torch_vae_encoder_output, onnx_vae_encoder_output)
+    print(f"Relative error between Torch and ONNX VAE Encoder outputs: {vae_encoder_error}")
+
+    # --- VAE DECODER ---
+    torch_vae_decoder_output = pipeline.vae.decode(torch_vae_encoder_output)
+    
+    ort_vae_decoder_session = ort.InferenceSession(str(Path(onnx_path) / "vae_decoder" / "model.onnx"))
+    ort_vae_decoder_inputs = {"latent_sample": onnx_vae_encoder_output}
+    onnx_vae_decoder_output = ort_vae_decoder_session.run(None, ort_vae_decoder_inputs)[0]
+    
+    vae_decoder_error = compare_outputs(torch_vae_decoder_output, onnx_vae_decoder_output)
+    print(f"Relative error between Torch and ONNX VAE Decoder outputs: {vae_decoder_error}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--model_path", type=str, required=True, help="Path to the Torch model.")
+    parser.add_argument("--onnx_path", type=str, required=True, help="Path to the ONNX model.")
+    parser.add_argument("--fp16", action="store_true", default=False, help="Use float16 precision for Torch model.")
+    
+    args = parser.parse_args()
+    
+    test_model_precision(args.model_path, args.onnx_path, args.fp16)
+
