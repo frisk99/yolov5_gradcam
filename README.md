@@ -152,3 +152,16 @@ for layer in tensor_details:
         total_params += layer['shape'].num_elements()
 
 print(f"Total parameters: {total_params}")
+from safetensors.torch import load_file
+import torch
+
+# 加载 SafeTensor 文件
+model_path = "path_to_your_model.safetensors"
+state_dict = load_file(model_path)
+
+# 计算参数量
+total_params = 0
+for param_name, param_tensor in state_dict.items():
+    total_params += param_tensor.numel()  # 统计每个张量的元素数量
+
+print(f"模型的总参数量: {total_params}")
