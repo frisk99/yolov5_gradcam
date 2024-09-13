@@ -49,119 +49,29 @@ Solve the custom dataset gradient not match.
 
 
 ```python
-#!/bin/bash
-
-# 查找当前文件夹及其子文件夹中的所有 bin/pip 和 bin/pip3 开头的文件
-find . -type f -path "*/bin/pip*" | while read -r file; do
-  # 使用 sed 命令替换文件中的内容
-  sed -i 's|!/home|!/data1|g' "$file"
-  echo "Processed $file"
-done
-import os
-import keras_cv
+import cv2
 import numpy as np
-import tensorflow as tf
-from PIL import Image
-import matplotlib.pyplot as plt
-from tensorflow import keras
 
-# Initialize the Stable Diffusion model
-stable_diffusion = keras_cv.models.StableDiffusion()
+# 读取两张图片和mask
+image1 = cv2.imread('image1.jpg')
+image2 = cv2.imread('image2.jpg')
+mask = cv2.imread('mask.png', cv2.IMREAD_GRAYSCALE)  # 读取mask为灰度图
 
-# Set the image, mask, and output directories
-image_folder = 'path_to_image_folder'
-mask_folder = 'path_to_mask_folder'
-output_folder = 'path_to_output_folder'
+# 确保图片尺寸相同
+if image1.shape != image2.shape:
+    raise ValueError("两张图片必须具有相同的尺寸")
+if mask.shape != image1.shape[:2]:
+    raise ValueError("遮罩的尺寸必须与图片匹配")
 
-# Create the output folder if it doesn't exist
-os.makedirs(output_folder, exist_ok=True)
+# 创建空白的结果图像
+result = np.zeros_like(image1)
 
-# Function to resize image and mask
-def resize_image_and_mask(image, mask, size=(512, 512)):
-    image = image.resize(size)
-    mask = mask.resize(size)
-    image = np.array(image)
-    mask = np.array(mask)
-    return image, mask
+# 使用mask进行合并操作
+for c in range(3):  # 对于每个颜色通道
+    result[:, :, c] = np.where(mask == 0, image1[:, :, c], image2[:, :, c])
 
-# Function to perform inpainting, plot results, and save the image
-def inpaint_and_save(image, mask, prompt, output_path):
-    mask = np.where(mask == 0, 1, 0)  # Inverting the mask
-    image = np.expand_dims(image, axis=0)
-    mask = np.expand_dims(mask, axis=0)
-
-    generated = stable_diffusion.inpaint(
-        prompt,
-        image=image,
-        mask=mask,
-    )
-
-    # Convert the generated image to PIL format and save it
-    generated_image = Image.fromarray((generated[0] * 255).astype(np.uint8))
-    generated_image.save(output_path)
-    print(f"Saved inpainted image to {output_path}")
-
-# Loop through the images and masks
-for filename in os.listdir(image_folder):
-    if filename.endswith(".png") or filename.endswith(".jpg"):
-        image_path = os.path.join(image_folder, filename)
-        mask_path = os.path.join(mask_folder, filename)  # Assuming masks have the same name as images
-
-        # Load the image and mask
-        image = Image.open(image_path)
-        mask = Image.open(mask_path).convert("L")  # Convert mask to grayscale
-
-        # Resize image and mask
-        image, mask = resize_image_and_mask(image, mask)
-
-        # Define the output file path
-        output_path = os.path.join(output_folder, filename)
-
-        # Perform inpainting and save the results
-        inpaint_and_save(image, mask, prompt="glancing at something", output_path=output_path)
-
-import gradio as gr
-import imageio
-
-def dummy(img):
-  imageio.imwrite("output_image.png", img["mask"])
-  return img["image"], img["mask"]
-
-with gr.Blocks() as demo:
-  with gr.Row():
-    img = gr.Image(tool="sketch", label="base image", show_label=True)
-    img1 = gr.Image()
-    img2 = gr.Image(label="mask image", show_label=True)
-  btn = gr.Button()
-  btn.click(dummy, img, [img1, img2])
-
-demo.launch(debug=True)
-import tensorflow as tf
-
-# Load your TFLite model
-interpreter = tf.lite.Interpreter(model_path="your_model.tflite")
-interpreter.allocate_tensors()
-
-# Get model details
-tensor_details = interpreter.get_tensor_details()
-
-# Calculate the total number of parameters
-total_params = 0
-for layer in tensor_details:
-    if 'weights' in layer['name'] or 'bias' in layer['name']:
-        total_params += layer['shape'].num_elements()
-
-print(f"Total parameters: {total_params}")
-from safetensors.torch import load_file
-import torch
-
-# 加载 SafeTensor 文件
-model_path = "path_to_your_model.safetensors"
-state_dict = load_file(model_path)
-
-# 计算参数量
-total_params = 0
-for param_name, param_tensor in state_dict.items():
-    total_params += param_tensor.numel()  # 统计每个张量的元素数量
-
-print(f"模型的总参数量: {total_params}")
+# 保存或显示合并结果
+cv2.imwrite('merged_image.jpg', result)
+cv2.imshow('Merged Image', result)
+cv2.waitKey(0)
+cv2.destroyAllWindows()
