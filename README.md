@@ -49,29 +49,20 @@ Solve the custom dataset gradient not match.
 
 
 ```python
-import cv2
 import numpy as np
+from PIL import Image
 
-# 读取两张图片和mask
-image1 = cv2.imread('image1.jpg')
-image2 = cv2.imread('image2.jpg')
-mask = cv2.imread('mask.png', cv2.IMREAD_GRAYSCALE)  # 读取mask为灰度图
+# 加载两张图片和mask
+img1 = np.array(Image.open('image1.jpg'))
+img2 = np.array(Image.open('image2.jpg'))
+mask = np.array(Image.open('mask.png').convert('L'))  # 灰度化处理
 
-# 确保图片尺寸相同
-if image1.shape != image2.shape:
-    raise ValueError("两张图片必须具有相同的尺寸")
-if mask.shape != image1.shape[:2]:
-    raise ValueError("遮罩的尺寸必须与图片匹配")
+# 将mask归一化为0和1
+mask = mask / 255.0
 
-# 创建空白的结果图像
-result = np.zeros_like(image1)
+# 合并图片
+merged_image = img1 * (1 - mask) + img2 * mask
 
-# 使用mask进行合并操作
-for c in range(3):  # 对于每个颜色通道
-    result[:, :, c] = np.where(mask == 0, image1[:, :, c], image2[:, :, c])
-
-# 保存或显示合并结果
-cv2.imwrite('merged_image.jpg', result)
-cv2.imshow('Merged Image', result)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+# 保存合并后的图片
+merged_image = Image.fromarray(merged_image.astype(np.uint8))
+merged_image.save('merged_image.png')
