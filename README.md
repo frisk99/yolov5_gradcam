@@ -100,7 +100,7 @@ int main() {
     return 0;
 }
 
-```cpp
+
 #include <stdio.h>
 #include <unistd.h>  // 包含 sleep 函数
 #include <pthread.h> // 包含 pthread 函数
