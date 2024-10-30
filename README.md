@@ -1,4 +1,4 @@
-# YOLO-V5 GRADCAM
+![10 OQ(D635UYA(%$79LA`$B](https://github.com/user-attachments/assets/3401c209-8b66-4d71-a9c5-d39595dda967)# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -48,33 +48,88 @@ Solve the custom dataset gradient not match.
 
 
 
-```python
-import streamlit as st
+```cpp
+#include <stdio.h>
+#include <unistd.h>  // 包含 sleep 函数
+#include <pthread.h> // 包含 pthread 函数
 
-def main():
-    st.sidebar.title("Navigation")
-    page = st.sidebar.radio("Go to", ["Home", "Upload", "Analyze"])
+// 定义回调函数类型
+typedef void (*callback_t)(int result);
 
-    if page == "Home":
-        home_page()
-    elif page == "Upload":
-        upload_page()
-    elif page == "Analyze":
-        analyze_page()
+// 回调函数实现
+void on_async_operation_complete(int result) {
+    printf("异步操作完成，结果：%d\n", result);
+}
 
-def home_page():
-    st.title("Home Page")
-    st.write("Welcome to the Home Page!")
+// 异步操作线程函数
+void* async_operation_thread(void* arg) {
+    callback_t callback = (callback_t)arg;
 
-def upload_page():
-    st.title("Upload Page")
-    uploaded_file = st.file_uploader("Choose a file")
-    if uploaded_file is not None:
-        st.write("File uploaded successfully!")
+    sleep(2);  // 模拟耗时的异步操作
 
-def analyze_page():
-    st.title("Analyze Page")
-    st.write("Analyze your data here.")
+    int result = 42;  // 假设这是异步操作的结果
 
-if __name__ == "__main__":
-    main()
+    if (callback) {
+        callback(result);  // 调用回调函数，传递结果
+    }
+
+    return NULL;
+}
+
+// 注册异步操作
+void async_operation(callback_t callback) {
+    pthread_t thread;
+    pthread_create(&thread, NULL, async_operation_thread, (void*)callback);
+    pthread_detach(thread);  // 分离线程，自动回收
+}
+
+int main() {
+    printf("开始异步操作...\n");
+
+    // 注册并执行异步操作，将回调函数传递进去
+    //async_operation(on_async_operation_complete);
+    pthread_t thread;
+    pthread_create(&thread, NULL, async_operation_thread, (void*)on_async_operation_complete);
+    pthread_detach(thread);  // 分离线程，自动回收
+
+    // 主线程继续做其他事情
+    printf("主线程正在执行其他任务...\n");
+
+    // 为了防止主线程结束得太快，可以增加一个 sleep，方便观察输出
+    sleep(3);
+    return 0;
+}
+
+```cpp
+#include <stdio.h>
+#include <unistd.h>  // 包含 sleep 函数
+#include <pthread.h> // 包含 pthread 函数
+
+// 直接处理结果的函数
+void handle_result(int result) {
+    printf("异步操作完成，结果：%d\n", result);
+}
+
+// 异步操作线程函数，直接调用处理函数
+void* async_operation_thread(void* arg) {
+    sleep(2);  // 模拟耗时的异步操作
+    int result = 42;  // 假设这是异步操作的结果
+
+    // 直接处理结果，而不是通过函数指针
+    handle_result(result);
+
+    return NULL;
+}
+
+int main() {
+    pthread_t thread;
+
+    // 创建线程执行异步操作
+    pthread_create(&thread, NULL, async_operation_thread, NULL);
+    pthread_join(thread, NULL);
+    printf("主线程正在执行其他任务...\n");
+
+
+    return 0;
+}
+
