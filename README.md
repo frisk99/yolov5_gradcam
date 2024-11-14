@@ -49,87 +49,30 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-#include <stdio.h>
-#include <unistd.h>  // 包含 sleep 函数
-#include <pthread.h> // 包含 pthread 函数
+import os
+import cv2
+import numpy as np
 
-// 定义回调函数类型
-typedef void (*callback_t)(int result);
+def calculate_rgb_mean_and_std(folder_path):
+    means, stds = [], []
+    for filename in os.listdir(folder_path):
+        file_path = os.path.join(folder_path, filename)
+        if os.path.isfile(file_path) and filename.lower().endswith(('png', 'jpg', 'jpeg', 'bmp', 'tiff')):
+            # 读取图片并转换为浮点格式
+            image = cv2.imread(file_path).astype(np.float32) / 255.0
+            # 计算每张图片的 RGB 平均值和标准差
+            means.append(np.mean(image, axis=(0, 1)))
+            stds.append(np.std(image, axis=(0, 1)))
 
-// 回调函数实现
-void on_async_operation_complete(int result) {
-    printf("异步操作完成，结果：%d\n", result);
-}
+    # 计算所有图片的平均值和标准差
+    mean_rgb = np.mean(means, axis=0)
+    std_rgb = np.mean(stds, axis=0)
+    
+    return mean_rgb, std_rgb
 
-// 异步操作线程函数
-void* async_operation_thread(void* arg) {
-    callback_t callback = (callback_t)arg;
+# 使用方法
+folder_path = 'your_folder_path_here'  # 替换成你的文件夹路径
+mean_rgb, std_rgb = calculate_rgb_mean_and_std(folder_path)
 
-    sleep(2);  // 模拟耗时的异步操作
-
-    int result = 42;  // 假设这是异步操作的结果
-
-    if (callback) {
-        callback(result);  // 调用回调函数，传递结果
-    }
-
-    return NULL;
-}
-
-// 注册异步操作
-void async_operation(callback_t callback) {
-    pthread_t thread;
-    pthread_create(&thread, NULL, async_operation_thread, (void*)callback);
-    pthread_detach(thread);  // 分离线程，自动回收
-}
-
-int main() {
-    printf("开始异步操作...\n");
-
-    // 注册并执行异步操作，将回调函数传递进去
-    //async_operation(on_async_operation_complete);
-    pthread_t thread;
-    pthread_create(&thread, NULL, async_operation_thread, (void*)on_async_operation_complete);
-    pthread_detach(thread);  // 分离线程，自动回收
-
-    // 主线程继续做其他事情
-    printf("主线程正在执行其他任务...\n");
-
-    // 为了防止主线程结束得太快，可以增加一个 sleep，方便观察输出
-    sleep(3);
-    return 0;
-}
-
-
-#include <stdio.h>
-#include <unistd.h>  // 包含 sleep 函数
-#include <pthread.h> // 包含 pthread 函数
-
-// 直接处理结果的函数
-void handle_result(int result) {
-    printf("异步操作完成，结果：%d\n", result);
-}
-
-// 异步操作线程函数，直接调用处理函数
-void* async_operation_thread(void* arg) {
-    sleep(2);  // 模拟耗时的异步操作
-    int result = 42;  // 假设这是异步操作的结果
-
-    // 直接处理结果，而不是通过函数指针
-    handle_result(result);
-
-    return NULL;
-}
-
-int main() {
-    pthread_t thread;
-
-    // 创建线程执行异步操作
-    pthread_create(&thread, NULL, async_operation_thread, NULL);
-    pthread_join(thread, NULL);
-    printf("主线程正在执行其他任务...\n");
-
-
-    return 0;
-}
-
+print("RGB Mean:", mean_rgb)
+print("RGB Std Dev:", std_rgb)
