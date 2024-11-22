@@ -54,62 +54,77 @@ Solve the custom dataset gradient not match.
 #include <vector>
 #include <string>
 
-// 定义结构体
-struct Person {
-    std::string name;
-    int age;
+// 自定义类型
+enum abnormal_type {
+    TYPE_A,
+    TYPE_B,
+    TYPE_C
+};
 
-    // 用于调试打印
+// 定义结构体
+struct Rect {
+    abnormal_type type;
+    int x1, x2, y1, y2;
+
+    // 打印函数，用于调试
     void print() const {
-        std::cout << "Name: " << name << ", Age: " << age << std::endl;
+        std::cout << "Type: " << type 
+                  << ", x1: " << x1 << ", x2: " << x2 
+                  << ", y1: " << y1 << ", y2: " << y2 << std::endl;
     }
 };
 
 // 将结构体数组序列化为字符串
-std::string structArrayToString(const std::vector<Person>& persons) {
+std::string structArrayToString(const std::vector<Rect>& rects) {
     std::ostringstream oss;
-    for (const auto& person : persons) {
-        oss << person.name << "," << person.age << ";";
+    for (const auto& rect : rects) {
+        oss << rect.type << "," << rect.x1 << "," << rect.x2 << "," 
+            << rect.y1 << "," << rect.y2 << ";";
     }
     return oss.str();
 }
 
 // 将字符串反序列化为结构体数组
-std::vector<Person> stringToStructArray(const std::string& data) {
-    std::vector<Person> persons;
+std::vector<Rect> stringToStructArray(const std::string& data) {
+    std::vector<Rect> rects;
     std::istringstream iss(data);
     std::string token;
 
     while (std::getline(iss, token, ';')) { // 按结构体分隔符解析
         if (!token.empty()) {
             std::istringstream fieldStream(token);
-            std::string name;
-            int age;
+            int type, x1, x2, y1, y2;
 
-            if (std::getline(fieldStream, name, ',') && fieldStream >> age) {
-                persons.push_back({name, age});
+            char delim; // 用于跳过逗号
+            if (fieldStream >> type >> delim >> x1 >> delim >> x2 
+                           >> delim >> y1 >> delim >> y2) {
+                rects.push_back({static_cast<abnormal_type>(type), x1, x2, y1, y2});
             }
         }
     }
 
-    return persons;
+    return rects;
 }
 
 int main() {
     // 初始化结构体数组
-    std::vector<Person> persons = {{"Alice", 30}, {"Bob", 25}, {"Charlie", 35}};
+    std::vector<Rect> rects = {
+        {TYPE_A, 10, 20, 30, 40},
+        {TYPE_B, 15, 25, 35, 45},
+        {TYPE_C, 5, 10, 15, 20}
+    };
 
     // 结构体数组转字符串
-    std::string serialized = structArrayToString(persons);
+    std::string serialized = structArrayToString(rects);
     std::cout << "Serialized: " << serialized << std::endl;
 
     // 字符串转回结构体数组
-    std::vector<Person> deserialized = stringToStructArray(serialized);
+    std::vector<Rect> deserialized = stringToStructArray(serialized);
 
     // 打印解析结果
     std::cout << "Deserialized:" << std::endl;
-    for (const auto& person : deserialized) {
-        person.print();
+    for (const auto& rect : deserialized) {
+        rect.print();
     }
 
     return 0;
