@@ -49,30 +49,68 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import os
-import cv2
-import numpy as np
+#include <iostream>
+#include <sstream>
+#include <vector>
+#include <string>
 
-def calculate_rgb_mean_and_std(folder_path):
-    means, stds = [], []
-    for filename in os.listdir(folder_path):
-        file_path = os.path.join(folder_path, filename)
-        if os.path.isfile(file_path) and filename.lower().endswith(('png', 'jpg', 'jpeg', 'bmp', 'tiff')):
-            # 读取图片并转换为浮点格式
-            image = cv2.imread(file_path).astype(np.float32) / 255.0
-            # 计算每张图片的 RGB 平均值和标准差
-            means.append(np.mean(image, axis=(0, 1)))
-            stds.append(np.std(image, axis=(0, 1)))
+// 定义结构体
+struct Person {
+    std::string name;
+    int age;
 
-    # 计算所有图片的平均值和标准差
-    mean_rgb = np.mean(means, axis=0)
-    std_rgb = np.mean(stds, axis=0)
-    
-    return mean_rgb, std_rgb
+    // 用于调试打印
+    void print() const {
+        std::cout << "Name: " << name << ", Age: " << age << std::endl;
+    }
+};
 
-# 使用方法
-folder_path = 'your_folder_path_here'  # 替换成你的文件夹路径
-mean_rgb, std_rgb = calculate_rgb_mean_and_std(folder_path)
+// 将结构体数组序列化为字符串
+std::string structArrayToString(const std::vector<Person>& persons) {
+    std::ostringstream oss;
+    for (const auto& person : persons) {
+        oss << person.name << "," << person.age << ";";
+    }
+    return oss.str();
+}
 
-print("RGB Mean:", mean_rgb)
-print("RGB Std Dev:", std_rgb)
+// 将字符串反序列化为结构体数组
+std::vector<Person> stringToStructArray(const std::string& data) {
+    std::vector<Person> persons;
+    std::istringstream iss(data);
+    std::string token;
+
+    while (std::getline(iss, token, ';')) { // 按结构体分隔符解析
+        if (!token.empty()) {
+            std::istringstream fieldStream(token);
+            std::string name;
+            int age;
+
+            if (std::getline(fieldStream, name, ',') && fieldStream >> age) {
+                persons.push_back({name, age});
+            }
+        }
+    }
+
+    return persons;
+}
+
+int main() {
+    // 初始化结构体数组
+    std::vector<Person> persons = {{"Alice", 30}, {"Bob", 25}, {"Charlie", 35}};
+
+    // 结构体数组转字符串
+    std::string serialized = structArrayToString(persons);
+    std::cout << "Serialized: " << serialized << std::endl;
+
+    // 字符串转回结构体数组
+    std::vector<Person> deserialized = stringToStructArray(serialized);
+
+    // 打印解析结果
+    std::cout << "Deserialized:" << std::endl;
+    for (const auto& person : deserialized) {
+        person.print();
+    }
+
+    return 0;
+}
