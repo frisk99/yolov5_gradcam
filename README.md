@@ -49,83 +49,25 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
+#include <opencv2/opencv.hpp>
 #include <iostream>
-#include <sstream>
-#include <vector>
-#include <string>
-
-// 自定义类型
-enum abnormal_type {
-    TYPE_A,
-    TYPE_B,
-    TYPE_C
-};
-
-// 定义结构体
-struct Rect {
-    abnormal_type type;
-    int x1, x2, y1, y2;
-
-    // 打印函数，用于调试
-    void print() const {
-        std::cout << "Type: " << type 
-                  << ", x1: " << x1 << ", x2: " << x2 
-                  << ", y1: " << y1 << ", y2: " << y2 << std::endl;
-    }
-};
-
-// 将结构体数组序列化为字符串
-std::string structArrayToString(const std::vector<Rect>& rects) {
-    std::ostringstream oss;
-    for (const auto& rect : rects) {
-        oss << rect.type << "," << rect.x1 << "," << rect.x2 << "," 
-            << rect.y1 << "," << rect.y2 << ";";
-    }
-    return oss.str();
-}
-
-// 将字符串反序列化为结构体数组
-std::vector<Rect> stringToStructArray(const std::string& data) {
-    std::vector<Rect> rects;
-    std::istringstream iss(data);
-    std::string token;
-
-    while (std::getline(iss, token, ';')) { // 按结构体分隔符解析
-        if (!token.empty()) {
-            std::istringstream fieldStream(token);
-            int type, x1, x2, y1, y2;
-
-            char delim; // 用于跳过逗号
-            if (fieldStream >> type >> delim >> x1 >> delim >> x2 
-                           >> delim >> y1 >> delim >> y2) {
-                rects.push_back({static_cast<abnormal_type>(type), x1, x2, y1, y2});
-            }
-        }
-    }
-
-    return rects;
-}
 
 int main() {
-    // 初始化结构体数组
-    std::vector<Rect> rects = {
-        {TYPE_A, 10, 20, 30, 40},
-        {TYPE_B, 15, 25, 35, 45},
-        {TYPE_C, 5, 10, 15, 20}
-    };
+    // 假设您有一个包含 1、84、8400 个浮点数的数组
+    float data[1 * 84 * 8400]; // 根据需要填充数据
 
-    // 结构体数组转字符串
-    std::string serialized = structArrayToString(rects);
-    std::cout << "Serialized: " << serialized << std::endl;
+    // 定义矩阵的尺寸
+    int sizes[] = {1, 84, 8400};
 
-    // 字符串转回结构体数组
-    std::vector<Rect> deserialized = stringToStructArray(serialized);
+    // 创建 cv::Mat 对象
+    cv::Mat mat(3, sizes, CV_32F, data);
 
-    // 打印解析结果
-    std::cout << "Deserialized:" << std::endl;
-    for (const auto& rect : deserialized) {
-        rect.print();
+    // 打印矩阵的尺寸
+    std::cout << "Matrix dimensions: ";
+    for (int i = 0; i < mat.dims; ++i) {
+        std::cout << mat.size[i] << " ";
     }
+    std::cout << std::endl;
 
     return 0;
 }
