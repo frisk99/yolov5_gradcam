@@ -48,26 +48,40 @@ Solve the custom dataset gradient not match.
 
 
 
-```cpp
-#include <opencv2/opencv.hpp>
-#include <iostream>
+```python
+from pycocotools.coco import COCO
+import random
+import os
+import shutil
 
-int main() {
-    // 假设您有一个包含 1、84、8400 个浮点数的数组
-    float data[1 * 84 * 8400]; // 根据需要填充数据
+# 配置路径
+annotations_path = 'annotations/instances_train2017.json'
+images_dir = 'train2017'
+output_dir = 'selected_images'
 
-    // 定义矩阵的尺寸
-    int sizes[] = {1, 84, 8400};
+# 初始化 COCO 数据
+coco = COCO(annotations_path)
 
-    // 创建 cv::Mat 对象
-    cv::Mat mat(3, sizes, CV_32F, data);
+# 获取 "person" 类别的 ID
+person_category_id = coco.getCatIds(catNms=['person'])[0]
 
-    // 打印矩阵的尺寸
-    std::cout << "Matrix dimensions: ";
-    for (int i = 0; i < mat.dims; ++i) {
-        std::cout << mat.size[i] << " ";
-    }
-    std::cout << std::endl;
+# 获取包含 "person" 的所有图片 ID
+image_ids = coco.getImgIds(catIds=[person_category_id])
 
-    return 0;
-}
+# 随机选择 100 张图片
+selected_image_ids = random.sample(image_ids, 100)
+
+# 获取图片信息
+selected_images = coco.loadImgs(selected_image_ids)
+
+# 创建输出目录
+os.makedirs(output_dir, exist_ok=True)
+
+# 复制选定的图片到输出目录
+for img in selected_images:
+    src_path = os.path.join(images_dir, img['file_name'])
+    dst_path = os.path.join(output_dir, img['file_name'])
+    shutil.copy(src_path, dst_path)
+
+print(f"已复制 {len(selected_images)} 张图片到 {output_dir}")
+
