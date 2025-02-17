@@ -49,39 +49,44 @@ Solve the custom dataset gradient not match.
 
 
 ```python
-from pycocotools.coco import COCO
-import random
-import os
-import shutil
 
-# 配置路径
-annotations_path = 'annotations/instances_train2017.json'
-images_dir = 'train2017'
-output_dir = 'selected_images'
+#include "tensorflow/lite/model.h"
+#include "tensorflow/lite/interpreter.h"
+#include "tensorflow/lite/delegates/delegate.h"
+#include "tensorflow/lite/delegates/npu_delegate.h"  // 假设你使用的是NPU Delegate
 
-# 初始化 COCO 数据
-coco = COCO(annotations_path)
+// 创建NPU Delegate
+std::unique_ptr<tflite::Delegate> CreateNpuDelegate() {
+    // 创建并配置NPU Delegate
+    auto npu_delegate = tflite::delegates::NpuDelegate::Create();
+    return npu_delegate;
+}
 
-# 获取 "person" 类别的 ID
-person_category_id = coco.getCatIds(catNms=['person'])[0]
+int main() {
+    // 加载模型
+    std::unique_ptr<tflite::FlatBufferModel> model = tflite::FlatBufferModel::BuildFromFile("your_model.tflite");
+    if (!model) {
+        std::cerr << "Failed to load model." << std::endl;
+        return -1;
+    }
 
-# 获取包含 "person" 的所有图片 ID
-image_ids = coco.getImgIds(catIds=[person_category_id])
+    // 创建Interpreter选项并绑定NPU Delegate
+    tflite::ops::builtin::BuiltinOpResolver resolver;
+    std::unique_ptr<tflite::Interpreter> interpreter;
+    
+    // 创建并绑定NPU Delegate
+    std::unique_ptr<tflite::Delegate> npu_delegate = CreateNpuDelegate();
+    tflite::InterpreterBuilder builder(*model, resolver);
+    builder.SetDelegate(std::move(npu_delegate));
 
-# 随机选择 100 张图片
-selected_image_ids = random.sample(image_ids, 100)
+    // 构建Interpreter
+    if (builder(&interpreter) != kTfLiteOk) {
+        std::cerr << "Failed to build interpreter." << std::endl;
+        return -1;
+    }
 
-# 获取图片信息
-selected_images = coco.loadImgs(selected_image_ids)
+    // 使用interpreter执行推理操作
+    interpreter->Invoke();
 
-# 创建输出目录
-os.makedirs(output_dir, exist_ok=True)
-
-# 复制选定的图片到输出目录
-for img in selected_images:
-    src_path = os.path.join(images_dir, img['file_name'])
-    dst_path = os.path.join(output_dir, img['file_name'])
-    shutil.copy(src_path, dst_path)
-
-print(f"已复制 {len(selected_images)} 张图片到 {output_dir}")
-
+    return 0;
+}
