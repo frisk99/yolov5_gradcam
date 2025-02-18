@@ -145,3 +145,7 @@ int main() {
 
     return 0;
 }
+auto* delegate = TfLiteGpuDelegateV2Create(/*default options=*/nullptr);
+if (interpreter->ModifyGraphWithDelegate(delegate) != kTfLiteOk) return false;
+
+// Run inference
