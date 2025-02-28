@@ -49,103 +49,36 @@ Solve the custom dataset gradient not match.
 
 
 ```python
+from transformers import pipeline, AutoTokenizer, TextStreamer
+from optimum.onnxruntime import ORTModelForCausalLM
 
-#include <iostream>
-#include <fstream>
-#include <string>
-#include <vector>
-#include <opencv2/opencv.hpp>  // 使用 OpenCV 读取图像
-#include <tensorflow/lite/model.h>
-#include <tensorflow/lite/interpreter.h>
-#include <tensorflow/lite/kernels/register.h>
+# 加载模型和分词器（需要先安装 optimum: pip install optimum[onnxruntime]）
+model = ORTModelForCausalLM.from_pretrained("onnx-community/DeepSeek-R1-Distill-Qwen-1.5B-ONNX")
+tokenizer = AutoTokenizer.from_pretrained("onnx-community/DeepSeek-R1-Distill-Qwen-1.5B-ONNX")
 
-int main() {
-    // 加载 TFLite 模型
-    const std::string model_path = "your_model.tflite";
-    std::ifstream model_file(model_path, std::ios::binary);
-    std::string model_data((std::istreambuf_iterator<char>(model_file)),
-                           std::istreambuf_iterator<char>());
-    auto model = tflite::FlatBufferModel::BuildFromBuffer(model_data.c_str(), model_data.size());
-    if (!model) {
-        std::cerr << "加载模型失败！" << std::endl;
-        return -1;
-    }
+# 创建文本生成管道
+generator = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer
+)
 
-    // 注册解释器
-    tflite::ops::builtin::BuiltinOpResolver resolver;
-    std::unique_ptr<tflite::Interpreter> interpreter;
-    tflite::InterpreterBuilder builder(*model, resolver);
-    builder(&interpreter);
-    if (!interpreter) {
-        std::cerr << "创建解释器失败！" << std::endl;
-        return -1;
-    }
+# 定义对话消息
+messages = [
+    {"role": "user", "content": "Solve the equation: x^2 - 3x + 2 = 0"}
+]
 
-    // 读取并预处理图像（640x480 图像）
-    const std::string image_path = "image.jpg";
-    cv::Mat img = cv::imread(image_path);  // 使用 OpenCV 读取图像
-    if (img.empty()) {
-        std::cerr << "读取图像失败！" << std::endl;
-        return -1;
-    }
+# 创建文本流式处理器
+streamer = TextStreamer(tokenizer, skip_prompt=True)
 
-    // 调整图像大小为 640x480，并确保是 RGB
-    cv::Mat resized_img;
-    cv::resize(img, resized_img, cv::Size(640, 480));  // 调整大小
+# 生成响应（需要将消息转换为模型接受的格式）
+prompt = tokenizer.apply_chat_template(messages, tokenize=False)
+output = generator(
+    prompt,
+    max_new_tokens=512,
+    do_sample=False,
+    streamer=streamer
+)
 
-    // 将图像数据转换为浮动类型，并归一化到 [0, 1] 范围
-    resized_img.convertTo(resized_img, CV_32F, 1.0 / 255);
-
-    // 将 OpenCV 图像数据填充到 TFLite 输入张量
-    auto input_tensor = interpreter->tensor(interpreter->inputs()[0]);
-    if (!input_tensor) {
-        std::cerr << "获取输入张量失败！" << std::endl;
-        return -1;
-    }
-
-    // 填充输入张量数据，假设张量形状是 [1, 640, 480, 3]
-    int input_height = 640;
-    int input_width = 480;
-    int input_channels = 3;
-    int input_size = input_height * input_width * input_channels;
-
-    // 获取输入张量的数据指针
-    float* input_data = input_tensor->data.f;
-
-    // 遍历图像每个像素并填充张量
-    for (int i = 0; i < input_height; ++i) {
-        for (int j = 0; j < input_width; ++j) {
-            for (int c = 0; c < input_channels; ++c) {
-                // OpenCV 图片是 BGR 格式，TensorFlow Lite 通常需要 RGB 格式
-                input_data[(i * input_width + j) * input_channels + c] =
-                    resized_img.at<cv::Vec3f>(i, j)[c];  // RGB 值
-            }
-        }
-    }
-
-    // 运行推理
-    if (interpreter->Invoke() != kTfLiteOk) {
-        std::cerr << "推理执行失败！" << std::endl;
-        return -1;
-    }
-
-    // 获取输出张量
-    auto output_tensor = interpreter->tensor(interpreter->outputs()[0]);
-    if (!output_tensor) {
-        std::cerr << "获取输出张量失败！" << std::endl;
-        return -1;
-    }
-
-    // 打印输出结果
-    std::cout << "推理结果：" << std::endl;
-    for (int i = 0; i < output_tensor->dims->data[1]; ++i) {
-        std::cout << output_tensor->data.f[i] << " ";
-    }
-    std::cout << std::endl;
-
-    return 0;
-}
-auto* delegate = TfLiteGpuDelegateV2Create(/*default options=*/nullptr);
-if (interpreter->ModifyGraphWithDelegate(delegate) != kTfLiteOk) return false;
-
-// Run inference
+# 输出结果
+print(output[0]['generated_text'])
