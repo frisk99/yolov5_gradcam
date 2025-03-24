@@ -1,4 +1,4 @@
-# YOLO-V5 GRADCAM
+1# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -49,36 +49,3 @@ Solve the custom dataset gradient not match.
 
 
 ```python
-from transformers import pipeline, AutoTokenizer, TextStreamer
-from optimum.onnxruntime import ORTModelForCausalLM
-
-# 加载模型和分词器（需要先安装 optimum: pip install optimum[onnxruntime]）
-model = ORTModelForCausalLM.from_pretrained("onnx-community/DeepSeek-R1-Distill-Qwen-1.5B-ONNX")
-tokenizer = AutoTokenizer.from_pretrained("onnx-community/DeepSeek-R1-Distill-Qwen-1.5B-ONNX")
-
-# 创建文本生成管道
-generator = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer
-)
-
-# 定义对话消息
-messages = [
-    {"role": "user", "content": "Solve the equation: x^2 - 3x + 2 = 0"}
-]
-
-# 创建文本流式处理器
-streamer = TextStreamer(tokenizer, skip_prompt=True)
-
-# 生成响应（需要将消息转换为模型接受的格式）
-prompt = tokenizer.apply_chat_template(messages, tokenize=False)
-output = generator(
-    prompt,
-    max_new_tokens=512,
-    do_sample=False,
-    streamer=streamer
-)
-
-# 输出结果
-print(output[0]['generated_text'])
