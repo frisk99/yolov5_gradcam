@@ -6,8 +6,8 @@ Please follow my GitHub account and star ⭐ the project if this functionality b
 light-toned wood, likely a natural or lightly stained wood species, top-down view, overhead perspective, flat angle, clear wood grain texture, realistic lighting, high detail
 
 
-wall with wallpaper only, indoor wall, front view, light-toned wallpaper, clean surface, subtle pattern, high resolution, photo-realistic
-indoor wall, front view, plain surface, light-toned paint or wallpaper, clean and minimal, soft lighting, photo-realistic, high detail
+wall with wallpaper only, front view, flat angle, light-toned wallpaper, photo-realistic, high resolution  
+Negative prompt: floor, ceiling, furniture, window, door, people, clutter
 
 ## Update:
 Repo works fine with yolov5-v6.1
