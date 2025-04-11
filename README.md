@@ -6,7 +6,7 @@ Please follow my GitHub account and star ⭐ the project if this functionality b
 light-toned wood, likely a natural or lightly stained wood species, top-down view, overhead perspective, flat angle, clear wood grain texture, realistic lighting, high detail
 
 
-brick wall, evenly spaced red bricks, mortar lines, full frontal view, realistic lighting
+wall with wallpaper only, indoor wall, front view, light-toned wallpaper, clean surface, subtle pattern, high resolution, photo-realistic
 indoor wall, front view, plain surface, light-toned paint or wallpaper, clean and minimal, soft lighting, photo-realistic, high detail
 
 ## Update:
