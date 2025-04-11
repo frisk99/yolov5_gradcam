@@ -7,6 +7,7 @@ light-toned wood, likely a natural or lightly stained wood species, top-down vie
 
 
 brick wall, evenly spaced red bricks, mortar lines, full frontal view, realistic lighting
+indoor wall, front view, plain surface, light-toned paint or wallpaper, clean and minimal, soft lighting, photo-realistic, high detail
 
 ## Update:
 Repo works fine with yolov5-v6.1
