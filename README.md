@@ -1,4 +1,4 @@
-1# YOLO-V5 GRADCAM
+21# YOLO-V5 GRADCAM
 
 I constantly desired to know to which part of an object the object-detection models pay more attention. So I searched for it, but I didn't find any for Yolov5.
 Here is my implementation of Grad-cam for YOLO-v5. To load the model I used the yolov5's main codes, and for computing GradCam I used the codes from the gradcam_plus_plus-pytorch repository.
@@ -130,3 +130,91 @@ for epoch in range(num_epochs):
         running_loss += loss.item()
 
     print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(dataloader)}")
+# 设置路径和数据加载器
+train_image_dir = 'path/to/train/images'
+train_mask_dir = 'path/to/train/masks'
+val_image_dir = 'path/to/val/images'
+val_mask_dir = 'path/to/val/masks'
+
+transform = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.ToTensor()
+])
+
+train_dataset = MHPDataset(train_image_dir, train_mask_dir, transform=transform)
+val_dataset = MHPDataset(val_image_dir, val_mask_dir, transform=transform)
+
+train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=4)
+val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=4)
+
+# 加载预训练模型并修改输出头
+num_classes = 20  # 假设有20个类别
+model = models.segmentation.fcn_resnet50(pretrained=True)
+model.classifier[4] = nn.Conv2d(512, num_classes, kernel_size=(1, 1))
+model.aux_classifier[4] = nn.Conv2d(256, num_classes, kernel_size=(1, 1))
+
+# 设置设备、损失函数和优化器
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model.to(device)
+
+criterion = nn.CrossEntropyLoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=1e-4)
+
+# 训练和验证循环
+num_epochs = 10
+for epoch in range(num_epochs):
+    # ---------------------
+    # Training phase
+    # ---------------------
+    model.train()
+    train_loss = 0.0
+    correct_train = 0
+    total_train = 0
+
+    for images, masks in train_loader:
+        images = images.to(device)
+        masks = masks.to(device)
+
+        optimizer.zero_grad()
+        outputs = model(images)['out']
+        loss = criterion(outputs, masks)
+        loss.backward()
+        optimizer.step()
+
+        train_loss += loss.item()
+        
+        preds = outputs.argmax(dim=1)
+        correct_train += (preds == masks).sum().item()
+        total_train += masks.numel()
+
+    train_accuracy = correct_train / total_train
+
+    # ---------------------
+    # Validation phase
+    # ---------------------
+    model.eval()
+    val_loss = 0.0
+    correct_val = 0
+    total_val = 0
+
+    with torch.no_grad():
+        for val_images, val_masks in val_loader:
+            val_images = val_images.to(device)
+            val_masks = val_masks.to(device)
+
+            val_outputs = model(val_images)['out']
+            loss = criterion(val_outputs, val_masks)
+            val_loss += loss.item()
+
+            val_preds = val_outputs.argmax(dim=1)
+            correct_val += (val_preds == val_masks).sum().item()
+            total_val += val_masks.numel()
+
+    val_accuracy = correct_val / total_val
+
+    # ---------------------
+    # 打印当前epoch的结果
+    # ---------------------
+    print(f"Epoch {epoch + 1}/{num_epochs}")
+    print(f"Train Loss: {train_loss / len(train_loader):.4f}, Train Accuracy: {train_accuracy:.4f}")
+    print(f"Val Loss: {val_loss / len(val_loader):.4f}, Val Accuracy: {val_accuracy:.4f}")
