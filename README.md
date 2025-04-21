@@ -54,167 +54,51 @@ Solve the custom dataset gradient not match.
 
 
 ```python
-
 import torch
-from torch import nn
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms, models
-from PIL import Image
-import os
+from torchvision.models.segmentation import fcn_resnet50
 
-# 自定义数据集
-class MHPDataset(Dataset):
-    def __init__(self, image_dir, mask_dir, transform=None):
-        self.image_dir = image_dir
-        self.mask_dir = mask_dir
-        self.image_filenames = os.listdir(image_dir)
-        self.transform = transform
+class FCNResNet50WithPreprocess(torch.nn.Module):
+    def __init__(self, num_classes=21, pretrained=True):
+        super().__init__()
+        self.model = fcn_resnet50(pretrained=pretrained, num_classes=num_classes)
+        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
 
-    def __len__(self):
-        return len(self.image_filenames)
+    def forward(self, x):
+        x = (x - self.mean.to(x.device)) / self.std.to(x.device)
 
-    def __getitem__(self, idx):
-        # 加载图像和对应的语义分割标签
-        img_path = os.path.join(self.image_dir, self.image_filenames[idx])
-        mask_path = os.path.join(self.mask_dir, self.image_filenames[idx].replace('.jpg', '.png'))
+        output = self.model(x) 
+        logits = output['out'] 
+        print(logits.shape)
+        pred = torch.argmax(logits, dim=1)  
+        return pred
+import torch
+import numpy as np
 
-        image = Image.open(img_path).convert('RGB')
-        mask = Image.open(mask_path)
+def compute_mIoU_from_logits(preds, labels, num_classes, ignore_index=None):
+    preds = torch.argmax(preds, dim=1)
 
-        # 如果有转换，应用到数据
-        if self.transform:
-            image = self.transform(image)
-            mask = torch.as_tensor(mask, dtype=torch.long)
+    preds = preds.view(-1)
+    labels = labels.view(-1)
 
-        return image, mask
+    if ignore_index is not None:
+        mask = labels != ignore_index
+        preds = preds[mask]
+        labels = labels[mask]
 
-# 数据加载器
-image_dir = 'path/to/images'
-mask_dir = 'path/to/masks'
-train_transform = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.ToTensor()
-])
+    ious = []
+    for cls in range(num_classes):
+        pred_inds = preds == cls
+        label_inds = labels == cls
 
-dataset = MHPDataset(image_dir, mask_dir, transform=train_transform)
-dataloader = DataLoader(dataset, batch_size=4, shuffle=True, num_workers=4)
+        intersection = (pred_inds & label_inds).sum().item()
+        union = (pred_inds | label_inds).sum().item()
 
-# 加载预训练的fcn_resnet50模型
-num_classes = 20  # 假设MHP有20个类别
-model = models.segmentation.fcn_resnet50(pretrained=True)
-model.classifier[4] = nn.Conv2d(512, num_classes, kernel_size=(1, 1))
+        if union == 0:
+            ious.append(float('nan'))  
+        else:
+            ious.append(intersection / union)
 
-# 损失函数和优化器
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=1e-4)
+    miou = np.nanmean(ious)
+    return miou, ious
 
-# 训练循环
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model.to(device)
-
-num_epochs = 10
-for epoch in range(num_epochs):
-    model.train()
-    running_loss = 0.0
-
-    for images, masks in dataloader:
-        images = images.to(device)
-        masks = masks.to(device)
-
-        optimizer.zero_grad()
-        outputs = model(images)['out']
-        loss = criterion(outputs, masks)
-        loss.backward()
-        optimizer.step()
-
-        running_loss += loss.item()
-
-    print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(dataloader)}")
-# 设置路径和数据加载器
-train_image_dir = 'path/to/train/images'
-train_mask_dir = 'path/to/train/masks'
-val_image_dir = 'path/to/val/images'
-val_mask_dir = 'path/to/val/masks'
-
-transform = transforms.Compose([
-    transforms.Resize((256, 256)),
-    transforms.ToTensor()
-])
-
-train_dataset = MHPDataset(train_image_dir, train_mask_dir, transform=transform)
-val_dataset = MHPDataset(val_image_dir, val_mask_dir, transform=transform)
-
-train_loader = DataLoader(train_dataset, batch_size=4, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_dataset, batch_size=4, shuffle=False, num_workers=4)
-
-# 加载预训练模型并修改输出头
-num_classes = 20  # 假设有20个类别
-model = models.segmentation.fcn_resnet50(pretrained=True)
-model.classifier[4] = nn.Conv2d(512, num_classes, kernel_size=(1, 1))
-model.aux_classifier[4] = nn.Conv2d(256, num_classes, kernel_size=(1, 1))
-
-# 设置设备、损失函数和优化器
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model.to(device)
-
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=1e-4)
-
-# 训练和验证循环
-num_epochs = 10
-for epoch in range(num_epochs):
-    # ---------------------
-    # Training phase
-    # ---------------------
-    model.train()
-    train_loss = 0.0
-    correct_train = 0
-    total_train = 0
-
-    for images, masks in train_loader:
-        images = images.to(device)
-        masks = masks.to(device)
-
-        optimizer.zero_grad()
-        outputs = model(images)['out']
-        loss = criterion(outputs, masks)
-        loss.backward()
-        optimizer.step()
-
-        train_loss += loss.item()
-        
-        preds = outputs.argmax(dim=1)
-        correct_train += (preds == masks).sum().item()
-        total_train += masks.numel()
-
-    train_accuracy = correct_train / total_train
-
-    # ---------------------
-    # Validation phase
-    # ---------------------
-    model.eval()
-    val_loss = 0.0
-    correct_val = 0
-    total_val = 0
-
-    with torch.no_grad():
-        for val_images, val_masks in val_loader:
-            val_images = val_images.to(device)
-            val_masks = val_masks.to(device)
-
-            val_outputs = model(val_images)['out']
-            loss = criterion(val_outputs, val_masks)
-            val_loss += loss.item()
-
-            val_preds = val_outputs.argmax(dim=1)
-            correct_val += (val_preds == val_masks).sum().item()
-            total_val += val_masks.numel()
-
-    val_accuracy = correct_val / total_val
-
-    # ---------------------
-    # 打印当前epoch的结果
-    # ---------------------
-    print(f"Epoch {epoch + 1}/{num_epochs}")
-    print(f"Train Loss: {train_loss / len(train_loader):.4f}, Train Accuracy: {train_accuracy:.4f}")
-    print(f"Val Loss: {val_loss / len(val_loader):.4f}, Val Accuracy: {val_accuracy:.4f}")
