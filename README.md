@@ -54,51 +54,158 @@ Solve the custom dataset gradient not match.
 
 
 ```python
+
+import os
 import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
+from torchvision import transforms
 from torchvision.models.segmentation import fcn_resnet50
-
-class FCNResNet50WithPreprocess(torch.nn.Module):
-    def __init__(self, num_classes=21, pretrained=True):
-        super().__init__()
-        self.model = fcn_resnet50(pretrained=pretrained, num_classes=num_classes)
-        self.mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
-        self.std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
-
-    def forward(self, x):
-        x = (x - self.mean.to(x.device)) / self.std.to(x.device)
-
-        output = self.model(x) 
-        logits = output['out'] 
-        print(logits.shape)
-        pred = torch.argmax(logits, dim=1)  
-        return pred
-import torch
+from PIL import Image
 import numpy as np
+from tqdm import tqdm
 
-def compute_mIoU_from_logits(preds, labels, num_classes, ignore_index=None):
-    preds = torch.argmax(preds, dim=1)
+# 自定义语义分割数据集
+class SegmentationDataset(Dataset):
+    def __init__(self, image_dir, mask_dir, transform=None, target_transform=None):
+        self.image_dir = image_dir
+        self.mask_dir = mask_dir
+        self.image_files = sorted(os.listdir(image_dir))
+        self.mask_files = sorted(os.listdir(mask_dir))
+        self.transform = transform
+        self.target_transform = target_transform
 
-    preds = preds.view(-1)
-    labels = labels.view(-1)
+    def __len__(self):
+        return len(self.image_files)
 
-    if ignore_index is not None:
-        mask = labels != ignore_index
-        preds = preds[mask]
-        labels = labels[mask]
+    def __getitem__(self, idx):
+        img = Image.open(os.path.join(self.image_dir, self.image_files[idx])).convert("RGB")
+        mask = Image.open(os.path.join(self.mask_dir, self.mask_files[idx])).convert("L")  # single-channel
+
+        if self.transform:
+            img = self.transform(img)
+        if self.target_transform:
+            mask = self.target_transform(mask)
+
+        return img, mask.long()
+
+# 参数配置
+NUM_CLASSES = 21  # 21 类，含背景
+BATCH_SIZE = 4
+NUM_EPOCHS = 50
+LEARNING_RATE = 1e-4
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# 图像和mask的转换
+image_transform = transforms.Compose([
+    transforms.Resize((512, 512)),
+    transforms.ToTensor(),
+    transforms.Normalize([0.485, 0.456, 0.406],  # ImageNet 均值
+                         [0.229, 0.224, 0.225])  # ImageNet 方差
+])
+
+mask_transform = transforms.Compose([
+    transforms.Resize((512, 512), interpolation=Image.NEAREST),
+    transforms.PILToTensor(),  # 输出 (1,H,W)
+    transforms.Lambda(lambda x: x.squeeze(0))  # 转为 (H, W)
+])
+
+# 构建 DataLoader
+train_dataset = SegmentationDataset("your_dataset/train/images", "your_dataset/train/masks",
+                                    transform=image_transform, target_transform=mask_transform)
+val_dataset = SegmentationDataset("your_dataset/val/images", "your_dataset/val/masks",
+                                  transform=image_transform, target_transform=mask_transform)
+
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+
+# 加载模型并替换 classifier
+model = fcn_resnet50(pretrained=True)
+
+# 冻结主干网络的所有层，保持原来训练好的特征提取能力
+for param in model.backbone.parameters():
+    param.requires_grad = False
+
+# 只训练 classifier 和 aux_classifier 部分
+for param in model.classifier.parameters():
+    param.requires_grad = True
+for param in model.aux_classifier.parameters():
+    param.requires_grad = True
+
+# 优化器
+optimizer = optim.Adam([
+    {'params': model.classifier.parameters()},
+    {'params': model.aux_classifier.parameters()}
+], lr=LEARNING_RATE)
+
+# 损失函数（ignore_index=255 是语义分割常规做法）
+criterion = nn.CrossEntropyLoss(ignore_index=255)
+
+# mIoU 计算函数
+def compute_miou(preds, labels, num_classes, ignore_index=255):
+    """
+    计算每一类 IoU，并返回 mean IoU（忽略 ignore_index）
+    preds, labels: tensor, shape = (N, H, W)
+    """
+    preds = preds.detach().cpu().numpy()
+    labels = labels.detach().cpu().numpy()
 
     ious = []
     for cls in range(num_classes):
+        if cls == ignore_index:
+            continue
         pred_inds = preds == cls
         label_inds = labels == cls
-
-        intersection = (pred_inds & label_inds).sum().item()
-        union = (pred_inds | label_inds).sum().item()
+        intersection = np.logical_and(pred_inds, label_inds).sum()
+        union = np.logical_or(pred_inds, label_inds).sum()
 
         if union == 0:
-            ious.append(float('nan'))  
+            ious.append(np.nan)  # 当前 batch 中该类没有出现
         else:
             ious.append(intersection / union)
+    # 返回平均 mIoU（忽略 NaN）
+    return np.nanmean(ious)
 
-    miou = np.nanmean(ious)
-    return miou, ious
+# 训练 & 验证函数
+def train_one_epoch(model, loader, optimizer, criterion):
+    model.train()
+    total_loss = 0
+    for imgs, masks in tqdm(loader, desc="Training"):
+        imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+        optimizer.zero_grad()
+        output = model(imgs)['out']
+        loss = criterion(output, masks)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    return total_loss / len(loader)
 
+def evaluate(model, loader, num_classes=21):
+    model.eval()
+    miou_scores = []
+
+    with torch.no_grad():
+        for imgs, masks in tqdm(loader, desc="Validating"):
+            imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
+            output = model(imgs)['out']
+            preds = torch.argmax(output, dim=1)
+
+            # 只取有效区域参与 mIoU
+            valid = masks != 255
+            if valid.sum() == 0:
+                continue
+            miou = compute_miou(preds[valid], masks[valid], num_classes)
+            miou_scores.append(miou)
+
+    return np.nanmean(miou_scores)
+
+# 训练主循环
+for epoch in range(NUM_EPOCHS):
+    print(f"\nEpoch {epoch+1}/{NUM_EPOCHS}")
+    train_loss = train_one_epoch(model, train_loader, optimizer, criterion)
+    val_miou = evaluate(model, val_loader)
+    print(f"Train Loss: {train_loss:.4f} | Val mIoU: {val_miou:.4f}")
+
+    # 保存模型
+    torch.save(model.state_dict(), f"fcn_epoch{epoch+1}.pth")
