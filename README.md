@@ -209,3 +209,15 @@ for epoch in range(NUM_EPOCHS):
 
     # 保存模型
     torch.save(model.state_dict(), f"fcn_epoch{epoch+1}.pth")
+import torch.nn as nn
+from torchvision.models.segmentation import fcn_resnet50
+
+def disable_dropout(module):
+    for name, child in module.named_children():
+        if isinstance(child, nn.Dropout):
+            setattr(module, name, nn.Dropout(p=0.0))
+        else:
+            disable_dropout(child)
+
+model = fcn_resnet50(pretrained=True)
+disable_dropout(model)
