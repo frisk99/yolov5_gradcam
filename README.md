@@ -55,169 +55,92 @@ Solve the custom dataset gradient not match.
 
 ```python
 
-import os
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-from torchvision import transforms
-from torchvision.models.segmentation import fcn_resnet50
-from PIL import Image
 import numpy as np
-from tqdm import tqdm
+from scipy.spatial.transform import Rotation as R
 
-# 自定义语义分割数据集
-class SegmentationDataset(Dataset):
-    def __init__(self, image_dir, mask_dir, transform=None, target_transform=None):
-        self.image_dir = image_dir
-        self.mask_dir = mask_dir
-        self.image_files = sorted(os.listdir(image_dir))
-        self.mask_files = sorted(os.listdir(mask_dir))
-        self.transform = transform
-        self.target_transform = target_transform
+# 假设已知两个相机的位姿
+xyz_left = np.array([0, 0, 0])    # 左相机位置（世界坐标系原点）
+ypr_left = np.array([0, 0, 0])    # 左相机欧拉角（yaw, pitch, roll，单位：度）
 
-    def __len__(self):
-        return len(self.image_files)
+xyz_right = np.array([0.1, 0, 0]) # 右相机位置（X 方向偏移 10cm）
+ypr_right = np.array([5, 0, 0])   # 右相机欧拉角（绕 Y 轴偏转 5°）
 
-    def __getitem__(self, idx):
-        img = Image.open(os.path.join(self.image_dir, self.image_files[idx])).convert("RGB")
-        mask = Image.open(os.path.join(self.mask_dir, self.mask_files[idx])).convert("L")  # single-channel
+# (1) 将欧拉角转换为旋转矩阵
+def ypr_to_rotation_matrix(yaw, pitch, roll):
+    """ 欧拉角 (Z-Y-X 顺序) 转旋转矩阵 """
+    yaw, pitch, roll = np.radians([yaw, pitch, roll])  # 转为弧度
+    Rz = np.array([[np.cos(yaw), -np.sin(yaw), 0],
+                   [np.sin(yaw),  np.cos(yaw), 0],
+                   [0,            0,           1]])
+    Ry = np.array([[np.cos(pitch),  0, np.sin(pitch)],
+                   [0,             1, 0],
+                   [-np.sin(pitch), 0, np.cos(pitch)]])
+    Rx = np.array([[1, 0,            0],
+                   [0, np.cos(roll), -np.sin(roll)],
+                   [0, np.sin(roll),  np.cos(roll)]])
+    return Rz @ Ry @ Rx  # 组合旋转
 
-        if self.transform:
-            img = self.transform(img)
-        if self.target_transform:
-            mask = self.target_transform(mask)
+# 计算左右相机的旋转矩阵
+R_left = ypr_to_rotation_matrix(*ypr_left)
+R_right = ypr_to_rotation_matrix(*ypr_right)
 
-        return img, mask.long()
+# (2) 计算右相机相对于左相机的变换
+T = xyz_right - xyz_left  # 平移向量
+R = np.linalg.inv(R_left) @ R_right  # 相对旋转矩阵
 
-# 参数配置
-NUM_CLASSES = 21  # 21 类，含背景
-BATCH_SIZE = 4
-NUM_EPOCHS = 50
-LEARNING_RATE = 1e-4
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("相对旋转矩阵 R:\n", R)
+print("相对平移向量 T:\n", T)
 
-# 图像和mask的转换
-image_transform = transforms.Compose([
-    transforms.Resize((512, 512)),
-    transforms.ToTensor(),
-    transforms.Normalize([0.485, 0.456, 0.406],  # ImageNet 均值
-                         [0.229, 0.224, 0.225])  # ImageNet 方差
-])
+import cv2
 
-mask_transform = transforms.Compose([
-    transforms.Resize((512, 512), interpolation=Image.NEAREST),
-    transforms.PILToTensor(),  # 输出 (1,H,W)
-    transforms.Lambda(lambda x: x.squeeze(0))  # 转为 (H, W)
-])
+# 假设已经标定了相机内参（K）和畸变系数（D）
+K_left = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])  # 左相机内参
+D_left = np.array([k1, k2, p1, p2, k3])                   # 左相机畸变
+K_right = np.array([[fx, 0, cx], [0, fy, cy], [0, 0, 1]])  # 右相机内参
+D_right = np.array([k1, k2, p1, p2, k3])                  # 右相机畸变
 
-# 构建 DataLoader
-train_dataset = SegmentationDataset("your_dataset/train/images", "your_dataset/train/masks",
-                                    transform=image_transform, target_transform=mask_transform)
-val_dataset = SegmentationDataset("your_dataset/val/images", "your_dataset/val/masks",
-                                  transform=image_transform, target_transform=mask_transform)
+# 立体校正
+image_size = (640, 480)  # 图像尺寸
+R1, R2, P1, P2, Q, _, _ = cv2.stereoRectify(
+    K_left, D_left, K_right, D_right, 
+    image_size, R, T,  # 使用计算得到的 R 和 T
+    flags=cv2.CALIB_ZERO_DISPARITY,
+    alpha=0  # 裁剪无效区域
+)
 
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
-val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False)
+# 计算校正映射
+left_map1, left_map2 = cv2.initUndistortRectifyMap(K_left, D_left, R1, P1, image_size, cv2.CV_16SC2)
+right_map1, right_map2 = cv2.initUndistortRectifyMap(K_right, D_right, R2, P2, image_size, cv2.CV_16SC2)
 
-# 加载模型并替换 classifier
-model = fcn_resnet50(pretrained=True)
+# 校正图像（假设已经读取左右图像）
+left_rectified = cv2.remap(left_img, left_map1, left_map2, cv2.INTER_LINEAR)
+right_rectified = cv2.remap(right_img, right_map1, right_map2, cv2.INTER_LINEAR)
 
-# 冻结主干网络的所有层，保持原来训练好的特征提取能力
-for param in model.backbone.parameters():
-    param.requires_grad = False
 
-# 只训练 classifier 和 aux_classifier 部分
-for param in model.classifier.parameters():
-    param.requires_grad = True
-for param in model.aux_classifier.parameters():
-    param.requires_grad = True
+# 转换为灰度图
+left_gray = cv2.cvtColor(left_rectified, cv2.COLOR_BGR2GRAY)
+right_gray = cv2.cvtColor(right_rectified, cv2.COLOR_BGR2GRAY)
 
-# 优化器
-optimizer = optim.Adam([
-    {'params': model.classifier.parameters()},
-    {'params': model.aux_classifier.parameters()}
-], lr=LEARNING_RATE)
+# 计算视差图（SGBM 算法）
+stereo = cv2.StereoSGBM_create(
+    minDisparity=0,
+    numDisparities=64,  # 视差范围
+    blockSize=5,
+    P1=8 * 3 * 5**2,
+    P2=32 * 3 * 5**2,
+    disp12MaxDiff=1,
+    uniquenessRatio=10,
+    speckleWindowSize=100,
+    speckleRange=32
+)
+disparity = stereo.compute(left_gray, right_gray).astype(np.float32) / 16.0
 
-# 损失函数（ignore_index=255 是语义分割常规做法）
-criterion = nn.CrossEntropyLoss(ignore_index=255)
+# 转换为深度图
+baseline = np.linalg.norm(T)  # 基线距离（单位：米）
+focal_length = K_left[0, 0]   # 焦距（像素单位）
+depth_map = (baseline * focal_length) / (disparity + 1e-6)  # 避免除以零
 
-# mIoU 计算函数
-def compute_miou(preds, labels, num_classes, ignore_index=255):
-    """
-    计算每一类 IoU，并返回 mean IoU（忽略 ignore_index）
-    preds, labels: tensor, shape = (N, H, W)
-    """
-    preds = preds.detach().cpu().numpy()
-    labels = labels.detach().cpu().numpy()
-
-    ious = []
-    for cls in range(num_classes):
-        if cls == ignore_index:
-            continue
-        pred_inds = preds == cls
-        label_inds = labels == cls
-        intersection = np.logical_and(pred_inds, label_inds).sum()
-        union = np.logical_or(pred_inds, label_inds).sum()
-
-        if union == 0:
-            ious.append(np.nan)  # 当前 batch 中该类没有出现
-        else:
-            ious.append(intersection / union)
-    # 返回平均 mIoU（忽略 NaN）
-    return np.nanmean(ious)
-
-# 训练 & 验证函数
-def train_one_epoch(model, loader, optimizer, criterion):
-    model.train()
-    total_loss = 0
-    for imgs, masks in tqdm(loader, desc="Training"):
-        imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
-        optimizer.zero_grad()
-        output = model(imgs)['out']
-        loss = criterion(output, masks)
-        loss.backward()
-        optimizer.step()
-        total_loss += loss.item()
-    return total_loss / len(loader)
-
-def evaluate(model, loader, num_classes=21):
-    model.eval()
-    miou_scores = []
-
-    with torch.no_grad():
-        for imgs, masks in tqdm(loader, desc="Validating"):
-            imgs, masks = imgs.to(DEVICE), masks.to(DEVICE)
-            output = model(imgs)['out']
-            preds = torch.argmax(output, dim=1)
-
-            # 只取有效区域参与 mIoU
-            valid = masks != 255
-            if valid.sum() == 0:
-                continue
-            miou = compute_miou(preds[valid], masks[valid], num_classes)
-            miou_scores.append(miou)
-
-    return np.nanmean(miou_scores)
-
-# 训练主循环
-for epoch in range(NUM_EPOCHS):
-    print(f"\nEpoch {epoch+1}/{NUM_EPOCHS}")
-    train_loss = train_one_epoch(model, train_loader, optimizer, criterion)
-    val_miou = evaluate(model, val_loader)
-    print(f"Train Loss: {train_loss:.4f} | Val mIoU: {val_miou:.4f}")
-
-    # 保存模型
-    torch.save(model.state_dict(), f"fcn_epoch{epoch+1}.pth")
-import torch.nn as nn
-from torchvision.models.segmentation import fcn_resnet50
-
-def disable_dropout(module):
-    for name, child in module.named_children():
-        if isinstance(child, nn.Dropout):
-            setattr(module, name, nn.Dropout(p=0.0))
-        else:
-            disable_dropout(child)
-
-model = fcn_resnet50(pretrained=True)
-disable_dropout(model)
+# 显示深度图
+depth_vis = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
+cv2.imshow("Depth Map", depth_vis)
+cv2.waitKey(0)
