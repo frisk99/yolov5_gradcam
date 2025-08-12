@@ -56,100 +56,90 @@ Solve the custom dataset gradient not match.
 ```python
 import cv2
 import numpy as np
-from scipy.spatial.transform import Rotation as R
 
-# -------------------------- 1. 加载数据 ----------------------------
-# 读取两张图像（上摄像头和下摄像头）
-img_top = cv2.imread("top_image.jpg")
-img_bottom = cv2.imread("bottom_image.jpg")
+# 假设你已经通过标定得到了这些参数
+# --------------------------------------------------------------------------
+# RGB相机的内参矩阵 K_rgb
+# 例如：K_rgb = np.array([[fx_rgb, 0, cx_rgb],
+#                       [0, fy_rgb, cy_rgb],
+#                       [0, 0, 1]])
+K_rgb = np.array([[800, 0, 640],
+                  [0, 800, 360],
+                  [0, 0, 1]])
 
-# 相机内参（需替换为实际值）
-K = np.array([[1000, 0, 320], [0, 1000, 240], [0, 0, 1]])  # 假设上下摄像头内参相同
-D = np.zeros(5)  # 假设无畸变
+# ToF相机的内参矩阵 K_tof
+K_tof = np.array([[320, 0, 240],
+                  [0, 320, 180],
+                  [0, 0, 1]])
 
-# 上摄像头的外参（世界坐标系到相机坐标系）
-xyz_top = np.array([0, 0, 0])       # 上摄像头位置（单位：米）
-ypr_top = np.array([0, 0, 0])        # 上摄像头欧拉角（yaw, pitch, roll，单位：度）
+# ToF相机到RGB相机的外参（旋转矩阵R和平移向量T）
+# 假设平移向量T是以米为单位
+R = np.array([[1, 0, 0],
+              [0, 1, 0],
+              [0, 0, 1]]) # 假设没有旋转
+T = np.array([[0.05], [0.0], [0.0]]) # 假设ToF相机在RGB相机右边5厘米
+# --------------------------------------------------------------------------
 
-# 下摄像头的外参
-xyz_bottom = np.array([0, -0.1, 0])  # 下摄像头位置（Y方向低10cm）
-ypr_bottom = np.array([0, 0, 0])     # 假设光轴平行
+def align_depth_to_rgb(depth_map, K_tof, K_rgb, R, T, rgb_image_shape):
+    """
+    将ToF深度图对齐到RGB图像。
 
-# -------------------------- 2. 计算相对位姿 ----------------------------
-# 将欧拉角转换为旋转矩阵
-def ypr_to_rotation(yaw, pitch, roll):
-    """ 欧拉角（Z-Y-X顺序）转旋转矩阵 """
-    return R.from_euler('zyx', [yaw, pitch, roll], degrees=True).as_matrix()
+    Args:
+        depth_map (np.ndarray): 原始ToF深度图 (H_tof x W_tof)。
+        K_tof (np.ndarray): ToF相机的内参矩阵。
+        K_rgb (np.ndarray): RGB相机的内参矩阵。
+        R (np.ndarray): ToF到RGB的旋转矩阵。
+        T (np.ndarray): ToF到RGB的平移向量。
+        rgb_image_shape (tuple): RGB图像的尺寸 (高度, 宽度)。
 
-# 计算上下相机的旋转矩阵
-R_top = ypr_to_rotation(*ypr_top)
-R_bottom = ypr_to_rotation(*ypr_bottom)
+    Returns:
+        np.ndarray: 对齐后的深度图，与RGB图像尺寸相同。
+    """
+    h_tof, w_tof = depth_map.shape
+    h_rgb, w_rgb = rgb_image_shape
 
-# 计算下摄像头相对于上摄像头的变换
-R_rel = R_top.T @ R_bottom                     # 相对旋转
-T_rel = R_top.T @ (xyz_bottom - xyz_top)       # 相对平移（注意坐标系转换）
-T_rel = T_rel.reshape(3, 1)                    # 转为列向量
+    # 创建一个空的对齐后的深度图，填充为0
+    aligned_depth = np.zeros((h_rgb, w_rgb), dtype=np.float32)
 
-print("相对旋转矩阵 R:\n", R_rel)
-print("相对平移向量 T:\n", T_rel)
+    # 遍历ToF深度图的每一个像素
+    for v_tof in range(h_tof):
+        for u_tof in range(w_tof):
+            Z_tof = depth_map[v_tof, u_tof]
 
-# -------------------------- 3. 立体校正 ----------------------------
-image_size = img_top.shape[1], img_top.shape[0]  # (width, height)
+            # 忽略无效的深度值（通常为0）
+            if Z_tof == 0:
+                continue
 
-# 立体校正
-R1, R2, P1, P2, Q, _, _ = cv2.stereoRectify(
-    K, D, K, D,
-    image_size, R_rel, T_rel,
-    flags=cv2.CALIB_ZERO_DISPARITY,
-    alpha=0.9
-)
+            # 1. 反向投影到ToF坐标系下的3D点
+            X_tof = (u_tof - K_tof[0, 2]) * Z_tof / K_tof[0, 0]
+            Y_tof = (v_tof - K_tof[1, 2]) * Z_tof / K_tof[1, 1]
+            p_tof = np.array([X_tof, Y_tof, Z_tof])
 
-# 生成校正映射
-map_top1, map_top2 = cv2.initUndistortRectifyMap(K, D, R1, P1, image_size, cv2.CV_16SC2)
-map_bottom1, map_bottom2 = cv2.initUndistortRectifyMap(K, D, R2, P2, image_size, cv2.CV_16SC2)
+            # 2. 将3D点转换到RGB坐标系
+            p_rgb = R @ p_tof + T.flatten()
 
-# 校正图像
-img_top_rect = cv2.remap(img_top, map_top1, map_top2, cv2.INTER_LINEAR)
-img_bottom_rect = cv2.remap(img_bottom, map_bottom1, map_bottom2, cv2.INTER_LINEAR)
+            # 3. 将3D点投影回RGB图像平面
+            X_rgb, Y_rgb, Z_rgb = p_rgb
+            
+            u_rgb = int( (X_rgb * K_rgb[0, 0] / Z_rgb) + K_rgb[0, 2] )
+            v_rgb = int( (Y_rgb * K_rgb[1, 1] / Z_rgb) + K_rgb[1, 2] )
 
-# -------------------------- 4. 立体匹配（垂直视差） ----------------------------
-# 转换为灰度图
-gray_top = cv2.cvtColor(img_top_rect, cv2.COLOR_BGR2GRAY)
-gray_bottom = cv2.cvtColor(img_bottom_rect, cv2.COLOR_BGR2GRAY)
+            # 4. 检查像素是否在RGB图像范围内，并更新对齐后的深度图
+            if 0 <= u_rgb < w_rgb and 0 <= v_rgb < h_rgb:
+                aligned_depth[v_rgb, u_rgb] = Z_rgb
 
-# 调整SGBM参数（适用于垂直视差）
-stereo = cv2.StereoSGBM_create(
-    minDisparity=0,
-    numDisparities=64,    # 视差范围（需根据基线调整）
-    blockSize=5,
-    P1=8 * 3 * 5**2,
-    P2=32 * 3 * 5**2,
-    disp12MaxDiff=1,
-    uniquenessRatio=10,
-    speckleWindowSize=100,
-    speckleRange=32,
-    mode=cv2.STEREO_SGBM_MODE_HH
-)
+    return aligned_depth
 
-# 计算视差（注意：上下摄像头的视差是垂直的！）
-disparity = stereo.compute(gray_top, gray_bottom).astype(np.float32) / 16.0
+# --- 模拟数据 ---
+# 假设一个 480x360 的ToF深度图
+# 为了简化，这里创建一个模拟的深度图
+# 深度值可以以毫米为单位，例如1000代表1米
+depth_map_tof = np.zeros((360, 480), dtype=np.float32)
+depth_map_tof[100:200, 100:300] = 1500 # 模拟一个深度为1.5米的物体
 
-# -------------------------- 5. 计算深度图 ----------------------------
-baseline = abs(T_rel[1][0])  # 基线距离（Y方向）
-focal_length = K[0, 0]       # 焦距（像素单位）
-depth_map = (baseline * focal_length) / (disparity + 1e-6)  # 避免除以零
+rgb_shape = (1080, 1920) # 假设RGB图像是1920x1080
+aligned_depth_map = align_depth_to_rgb(depth_map_tof, K_tof, K_rgb, R, T, rgb_shape)
 
-# 过滤无效值
-depth_map[disparity <= 0] = 0
-
-# -------------------------- 6. 可视化 ----------------------------
-# 归一化显示
-disparity_vis = cv2.normalize(disparity, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-depth_vis = cv2.normalize(depth_map, None, 0, 255, cv2.NORM_MINMAX, dtype=cv2.CV_8U)
-
-cv2.imshow("Top Image Rectified", img_top_rect)
-cv2.imshow("Bottom Image Rectified", img_bottom_rect)
-cv2.imshow("Disparity", disparity_vis)
-cv2.imshow("Depth Map", depth_vis)
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+# 可以使用OpenCV可视化结果
+cv2.imwrite("aligned_depth_map.png", aligned_depth_map)
+print("深度图对齐完成，结果已保存。")
