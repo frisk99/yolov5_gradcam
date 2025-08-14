@@ -54,96 +54,169 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import cv2
-import numpy as np
+#include <iostream>
+#include <vector>
+#include <complex>
+#include <opencv2/opencv.hpp>
 
-def get_fourier_descriptors(contour, n_descriptors=20):
-    """
-    计算轮廓的傅里叶描述符。
+/**
+ * @brief 计算轮廓的傅里叶描述子
+ * * @param contour 输入的轮廓点 (std::vector<cv::Point>)
+ * @param num_descriptors 希望得到的描述子数量
+ * @return std::vector<double> 归一化后的傅里叶描述子 (幅值)
+ */
+std::vector<double> calculateFourierDescriptors(const std::vector<cv::Point>& contour, int num_descriptors) {
+    if (contour.empty()) {
+        return {};
+    }
+
+    // 1. 将轮廓点转换为复数序列
+    std::vector<std::complex<double>> complex_points;
+    for (const auto& p : contour) {
+        complex_points.emplace_back(static_cast<double>(p.x), static_cast<double>(p.y));
+    }
+
+    // 2. 使用OpenCV进行离散傅里叶变换 (DFT)
+    cv::Mat dft_input(complex_points.size(), 1, CV_64FC2, complex_points.data());
+    cv::Mat dft_output;
+    cv::dft(dft_input, dft_output);
+
+    // 3. 归一化傅里叶描述子
+    std::vector<double> descriptors;
     
-    Args:
-        contour (np.array): 轮廓点的数组。
-        n_descriptors (int): 截取傅里叶描述符的数量。
+    // 获取第一个非直流分量 u_1 的幅值，用于缩放归一化
+    // dft_output.at<cv::Vec2d>(i, 0)[0] 是实部, [1] 是虚部
+    double mag_u1 = cv::sqrt(
+        dft_output.at<cv::Vec2d>(1, 0)[0] * dft_output.at<cv::Vec2d>(1, 0)[0] +
+        dft_output.at<cv::Vec2d>(1, 0)[1] * dft_output.at<cv::Vec2d>(1, 0)[1]
+    );
+
+    // 提取描述子，从 u_1 开始，实现平移不变性
+    // 使用幅值，实现旋转不变性
+    // 除以 |u_1|，实现缩放不变性
+    for (int i = 1; i < std::min((int)dft_output.rows, num_descriptors + 1); ++i) {
+        double real = dft_output.at<cv::Vec2d>(i, 0)[0];
+        double imag = dft_output.at<cv::Vec2d>(i, 0)[1];
+        double magnitude = cv::sqrt(real * real + imag * imag);
         
-    Returns:
-        np.array: 归一化后的傅里叶描述符。
-    """
-    if contour is None or contour.shape[0] < 2:
-        return None
+        if (mag_u1 > 1e-9) { // 避免除以零
+            descriptors.push_back(magnitude / mag_u1);
+        } else {
+            descriptors.push_back(0.0);
+        }
+    }
 
-    # 将轮廓坐标转换为复数序列
-    x = contour[:, 0, 0] if contour.ndim == 3 else contour[:, 0]
-    y = contour[:, 0, 1] if contour.ndim == 3 else contour[:, 1]
-    complex_sequence = x + 1j * y
-    
-    # 进行傅里叶变换
-    fourier_coeffs = np.fft.fft(complex_sequence)
+    return descriptors;
+}
 
-    # 归一化以实现不变性
-    if fourier_coeffs.size < n_descriptors + 2:
-        return None
-        
-    fourier_coeffs_normalized = fourier_coeffs[1:n_descriptors+1]
-    
-    # 除以第二个系数的模，实现缩放和旋转不变性
-    fd = np.abs(fourier_coeffs_normalized) / np.abs(fourier_coeffs[1])
-    
-    return fd
+/**
+ * @brief (可选) 从傅里叶系数重建轮廓，用于验证
+ * * @param dft_coeffs DFT变换后的完整系数
+ * @param num_to_keep 保留的系数数量 (用于低通滤波重建)
+ * @param original_size 原始轮廓的点数
+ * @return std::vector<cv::Point> 重建的轮廓点
+ */
+std::vector<cv::Point> reconstructFromFourierDescriptors(const cv::Mat& dft_coeffs, int num_to_keep, int original_size) {
+    cv::Mat truncated_coeffs = cv::Mat::zeros(dft_coeffs.size(), dft_coeffs.type());
 
-def get_descriptors_from_points(points):
-    """
-    从一组(x, y)坐标点计算傅里叶描述符。
+    // 保留低频分量和对应的高频共轭分量
+    for (int i = 0; i < num_to_keep; ++i) {
+        truncated_coeffs.at<cv::Vec2d>(i, 0) = dft_coeffs.at<cv::Vec2d>(i, 0);
+        // 保留共轭对称部分
+        if (i > 0) {
+           truncated_coeffs.at<cv::Vec2d>(original_size - i, 0) = dft_coeffs.at<cv::Vec2d>(original_size - i, 0);
+        }
+    }
     
-    Args:
-        points (np.array): Nx2的数组，表示(x, y)坐标。
-        
-    Returns:
-        np.array: 归一化后的傅里叶描述符，如果失败则返回None。
-    """
-    if points is None or points.shape[0] < 3:
-        print("点数量少于3个，无法计算凸包。")
-        return None
+    cv::Mat reconstructed_mat;
+    // 进行逆傅里叶变换 (IDFT)
+    cv::idft(truncated_coeffs, reconstructed_mat, cv::DFT_SCALE | cv::DFT_REAL_OUTPUT);
 
-    # 1. 计算最小凸包
-    # 将 NumPy 数组转换为适合 OpenCV 的格式 (N, 1, 2)
-    points_for_cv = points.astype(np.int32).reshape(-1, 1, 2)
+    std::vector<cv::Point> reconstructed_points;
+    for (int i = 0; i < reconstructed_mat.rows; ++i) {
+        // IDFT输出的是CV_64FC2, 但因为我们指定了DFT_REAL_OUTPUT，虚部应为0
+        // 但为了安全，我们还是从CV_64FC2读取
+        double x = reconstructed_mat.at<cv::Vec2d>(i, 0)[0];
+        double y = reconstructed_mat.at<cv::Vec2d>(i, 0)[1];
+        reconstructed_points.emplace_back(cv::saturate_cast<int>(x), cv::saturate_cast<int>(y));
+    }
     
-    try:
-        convex_hull = cv2.convexHull(points_for_cv)
-        # 2. 计算傅里叶描述符
-        fourier_descriptors = get_fourier_descriptors(convex_hull)
-        return fourier_descriptors
-    except cv2.error as e:
-        print(f"计算凸包失败: {e}")
-        return None
+    // 注意：IDFT的结果需要手动转换为cv::Point。
+    // 在OpenCV 4.5.2+，使用DFT_REAL_OUTPUT时，输出是一个单通道实数矩阵。
+    // 为兼容旧版，这里仍按双通道读取。如果使用新版，可以简化为：
+    // reconstructed_mat.convertTo(reconstructed_mat, CV_32S);
+    // std::vector<cv::Point> reconstructed_points(reconstructed_mat.begin<cv::Point>(), reconstructed_mat.end<cv::Point>());
 
-# --- 主程序示例 ---
-if __name__ == '__main__':
-    # 1. 模拟一组人腿形状的(x, y)坐标点
-    # 这组点可以是TOF深度图的(x, y)投影，或任何其他方式获取的点集
-    num_points = 500
-    
-    # 模拟“大腿”部分（不规则的椭圆点）
-    t = np.linspace(0, 2 * np.pi, num_points // 2)
-    x1 = 50 * np.cos(t) + np.random.normal(0, 2, num_points // 2)
-    y1 = 100 * np.sin(t) + np.random.normal(0, 2, num_points // 2)
-    
-    # 模拟“小腿”部分（矩形点）
-    x2 = np.linspace(-30, 30, num_points // 2) + 150
-    y2 = np.random.uniform(50, -50, num_points // 2)
-    
-    leg_points = np.vstack((np.vstack((x1, y1)).T, np.vstack((x2, y2)).T))
-    
-    # 2. 从这些点集中直接计算傅里叶描述符
-    fourier_descriptors = get_descriptors_from_points(leg_points)
-    
-    if fourier_descriptors is not None:
-        print("计算出的人腿轮廓傅里叶描述符：")
-        print(fourier_descriptors)
 
-    # 3. 可视化
-    hull = cv2.convexHull(leg_points.astype(np.int32).reshape(-1, 1, 2))
+    return reconstructed_points;
+}
+
+
+int main() {
+    // 1. 创建一个示例二值图像 (这里用一个手形轮廓)
+    cv::Mat binary_image = cv::Mat::zeros(500, 500, CV_8UC1);
+    std::vector<cv::Point> hand_contour = {
+        {100, 300}, {120, 200}, {150, 180}, {180, 220}, {200, 210}, {220, 250},
+        {250, 240}, {280, 280}, {300, 270}, {320, 320}, {300, 350}, {250, 360},
+        {200, 380}, {150, 350}, {120, 320}
+    };
+    std::vector<std::vector<cv::Point>> contours_to_draw = {hand_contour};
+    cv::drawContours(binary_image, contours_to_draw, 0, cv::Scalar(255), cv::FILLED);
+
+    // 2. 查找轮廓
+    std::vector<std::vector<cv::Point>> contours;
+    cv::findContours(binary_image, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_NONE);
+
+    if (contours.empty()) {
+        std::cerr << "Error: No contours found!" << std::endl;
+        return -1;
+    }
+
+    // 假设我们处理最大的轮廓
+    const auto& main_contour = contours[0];
+
+    // 3. 计算傅里叶描述子
+    int num_descriptors = 10; // 我们需要10个描述子
+    std::vector<double> fds = calculateFourierDescriptors(main_contour, num_descriptors);
+
+    std::cout << "Calculated " << num_descriptors << " Fourier Descriptors:" << std::endl;
+    for (size_t i = 0; i < fds.size(); ++i) {
+        std::cout << "FD " << i + 1 << ": " << fds[i] << std::endl;
+    }
     
+    // 4. (可选) 从傅里叶系数重建并可视化
+    // 首先，我们需要未经归一化的完整DFT系数
+    std::vector<std::complex<double>> complex_points;
+    for (const auto& p : main_contour) {
+        complex_points.emplace_back(static_cast<double>(p.x), static_cast<double>(p.y));
+    }
+    cv::Mat dft_input(complex_points.size(), 1, CV_64FC2, complex_points.data());
+    cv::Mat full_dft_coeffs;
+    cv::dft(dft_input, full_dft_coeffs);
+    
+    // 使用前8个描述子（系数）来重建
+    int coeffs_to_reconstruct = 8;
+    std::vector<cv::Point> reconstructed_contour = reconstructFromFourierDescriptors(full_dft_coeffs, coeffs_to_reconstruct, main_contour.size());
+    
+    // 5. 可视化结果
+    cv::Mat result_image = cv::Mat::zeros(500, 500, CV_8UC3);
+    
+    // 绘制原始轮廓 (绿色)
+    std::vector<std::vector<cv::Point>> original_contours_vec = {main_contour};
+    cv::drawContours(result_image, original_contours_vec, 0, cv::Scalar(0, 255, 0), 2); // Green
+
+    // 绘制重建轮廓 (红色)
+    if (!reconstructed_contour.empty()) {
+        std::vector<std::vector<cv::Point>> reconstructed_contours_vec = {reconstructed_contour};
+        cv::drawContours(result_image, reconstructed_contours_vec, 0, cv::Scalar(0, 0, 255), 2); // Red
+    }
+
+    cv::imshow("Original (Green) vs Reconstructed (Red)", result_image);
+    cv::waitKey(0);
+
+    return 0;
+}
+
     canvas_size = 400
     canvas = np.zeros((canvas_size, canvas_size, 3), dtype=np.uint8)
     
