@@ -54,95 +54,113 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-#include <Eigen/Dense>
+import cv2
+import numpy as np
 
-// 将 pitch, yaw, roll 转换为旋转矩阵
-Eigen::Matrix3f euler_to_rotation_matrix(float pitch, float yaw, float roll) {
-    Eigen::AngleAxisf rollAngle(roll, Eigen::Vector3f::UnitX());
-    Eigen::AngleAxisf pitchAngle(pitch, Eigen::Vector3f::UnitY());
-    Eigen::AngleAxisf yawAngle(yaw, Eigen::Vector3f::UnitZ());
-    Eigen::Quaternion<float> q = yawAngle * pitchAngle * rollAngle;
-    Eigen::Matrix3f R = q.matrix();
-    return R;
-}
-
-#include <opencv2/opencv.hpp>
-#include <Eigen/Dense>
-
-// 你的 ToF 相机内参
-const cv::Mat K_tof = (cv::Mat_<double>(3, 3) <<
-    320, 0, 240,
-    0, 320, 180,
-    0, 0, 1);
-
-// 你的 RGB 相机内参
-const cv::Mat K_rgb = (cv::Mat_<double>(3, 3) <<
-    800, 0, 640,
-    0, 800, 360,
-    0, 0, 1);
-
-// ... (上面定义的 euler_to_rotation_matrix 函数) ...
-
-cv::Mat alignDepthToRgbWithPyw(
-    const cv::Mat& depth_map, 
-    const Eigen::Vector3f& xyz_tof_to_rgb, 
-    const Eigen::Vector3f& pyw_tof_to_rgb, 
-    int rgb_width, 
-    int rgb_height) {
-
-    // 从 pyw 计算旋转矩阵 R
-    Eigen::Matrix3f R = euler_to_rotation_matrix(pyw_tof_to_rgb[0], pyw_tof_to_rgb[1], pyw_tof_to_rgb[2]);
-    Eigen::Vector3f T = xyz_tof_to_rgb;
-
-    // 创建空的对齐后的深度图，与 RGB 图像尺寸相同
-    cv::Mat aligned_depth = cv::Mat::zeros(rgb_height, rgb_width, CV_32FC1);
-
-    // 获取 ToF 内参
-    double fx_tof = K_tof.at<double>(0, 0);
-    double fy_tof = K_tof.at<double>(1, 1);
-    double cx_tof = K_tof.at<double>(0, 2);
-    double cy_tof = K_tof.at<double>(1, 2);
-
-    // 获取 RGB 内参
-    double fx_rgb = K_rgb.at<double>(0, 0);
-    double fy_rgb = K_rgb.at<double>(1, 1);
-    double cx_rgb = K_rgb.at<double>(0, 2);
-    double cy_rgb = K_rgb.at<double>(1, 2);
+def get_fourier_descriptors(contour, n_descriptors=20):
+    """
+    计算轮廓的傅里叶描述符。
     
-    // 遍历 ToF 深度图中的每个像素
-    for (int v_tof = 0; v_tof < depth_map.rows; ++v_tof) {
-        for (int u_tof = 0; u_tof < depth_map.cols; ++u_tof) {
-            float Z_tof = depth_map.at<float>(v_tof, u_tof);
+    Args:
+        contour (np.array): 轮廓点的数组。
+        n_descriptors (int): 截取傅里叶描述符的数量。
+        
+    Returns:
+        np.array: 归一化后的傅里叶描述符。
+    """
+    if contour is None or contour.shape[0] < 2:
+        return None
 
-            if (Z_tof <= 0) continue;
+    # 将轮廓坐标转换为复数序列
+    x = contour[:, 0, 0] if contour.ndim == 3 else contour[:, 0]
+    y = contour[:, 0, 1] if contour.ndim == 3 else contour[:, 1]
+    complex_sequence = x + 1j * y
+    
+    # 进行傅里叶变换
+    fourier_coeffs = np.fft.fft(complex_sequence)
 
-            // 1. 反向投影到 ToF 坐标系下的 3D 点
-            float X_tof = (u_tof - cx_tof) * Z_tof / fx_tof;
-            float Y_tof = (v_tof - cy_tof) * Z_tof / fy_tof;
-            Eigen::Vector3f p_tof(X_tof, Y_tof, Z_tof);
+    # 归一化以实现不变性
+    if fourier_coeffs.size < n_descriptors + 2:
+        return None
+        
+    fourier_coeffs_normalized = fourier_coeffs[1:n_descriptors+1]
+    
+    # 除以第二个系数的模，实现缩放和旋转不变性
+    fd = np.abs(fourier_coeffs_normalized) / np.abs(fourier_coeffs[1])
+    
+    return fd
 
-            // 2. 将 3D 点转换到 RGB 坐标系
-            Eigen::Vector3f p_rgb = R * p_tof + T;
+def get_descriptors_from_points(points):
+    """
+    从一组(x, y)坐标点计算傅里叶描述符。
+    
+    Args:
+        points (np.array): Nx2的数组，表示(x, y)坐标。
+        
+    Returns:
+        np.array: 归一化后的傅里叶描述符，如果失败则返回None。
+    """
+    if points is None or points.shape[0] < 3:
+        print("点数量少于3个，无法计算凸包。")
+        return None
 
-            // 3. 投影回 RGB 图像平面
-            float X_rgb = p_rgb(0);
-            float Y_rgb = p_rgb(1);
-            float Z_rgb = p_rgb(2);
+    # 1. 计算最小凸包
+    # 将 NumPy 数组转换为适合 OpenCV 的格式 (N, 1, 2)
+    points_for_cv = points.astype(np.int32).reshape(-1, 1, 2)
+    
+    try:
+        convex_hull = cv2.convexHull(points_for_cv)
+        # 2. 计算傅里叶描述符
+        fourier_descriptors = get_fourier_descriptors(convex_hull)
+        return fourier_descriptors
+    except cv2.error as e:
+        print(f"计算凸包失败: {e}")
+        return None
 
-            if (Z_rgb <= 0) continue;
+# --- 主程序示例 ---
+if __name__ == '__main__':
+    # 1. 模拟一组人腿形状的(x, y)坐标点
+    # 这组点可以是TOF深度图的(x, y)投影，或任何其他方式获取的点集
+    num_points = 500
+    
+    # 模拟“大腿”部分（不规则的椭圆点）
+    t = np.linspace(0, 2 * np.pi, num_points // 2)
+    x1 = 50 * np.cos(t) + np.random.normal(0, 2, num_points // 2)
+    y1 = 100 * np.sin(t) + np.random.normal(0, 2, num_points // 2)
+    
+    # 模拟“小腿”部分（矩形点）
+    x2 = np.linspace(-30, 30, num_points // 2) + 150
+    y2 = np.random.uniform(50, -50, num_points // 2)
+    
+    leg_points = np.vstack((np.vstack((x1, y1)).T, np.vstack((x2, y2)).T))
+    
+    # 2. 从这些点集中直接计算傅里叶描述符
+    fourier_descriptors = get_descriptors_from_points(leg_points)
+    
+    if fourier_descriptors is not None:
+        print("计算出的人腿轮廓傅里叶描述符：")
+        print(fourier_descriptors)
 
-            int u_rgb = static_cast<int>((X_rgb * fx_rgb / Z_rgb) + cx_rgb);
-            int v_rgb = static_cast<int>((Y_rgb * fy_rgb / Z_rgb) + cy_rgb);
-
-            // 4. 检查边界并更新深度图
-            if (u_rgb >= 0 && u_rgb < rgb_width && v_rgb >= 0 && v_rgb < rgb_height) {
-                // ... 深度冲突处理逻辑 ...
-                float current_depth = aligned_depth.at<float>(v_rgb, u_rgb);
-                if (current_depth == 0 || Z_rgb < current_depth) {
-                    aligned_depth.at<float>(v_rgb, u_rgb) = Z_rgb;
-                }
-            }
-        }
-    }
-    return aligned_depth;
-}
+    # 3. 可视化
+    hull = cv2.convexHull(leg_points.astype(np.int32).reshape(-1, 1, 2))
+    
+    canvas_size = 400
+    canvas = np.zeros((canvas_size, canvas_size, 3), dtype=np.uint8)
+    
+    # 将点集平移到画布中心，方便观察
+    # min_x, min_y = np.min(leg_points, axis=0)
+    # max_x, max_y = np.max(leg_points, axis=0)
+    # center_x = (min_x + max_x) / 2
+    # center_y = (min_y + max_y) / 2
+    # leg_points_centered = leg_points - [center_x, center_y] + [canvas_size / 2, canvas_size / 2]
+    
+    # 绘制原始点
+    for point in leg_points.astype(np.int32):
+        cv2.circle(canvas, tuple(point + 150), 2, (255, 255, 255), -1)
+    
+    # 绘制凸包
+    cv2.drawContours(canvas, [hull.astype(np.int32) + [150, 150]], -1, (0, 255, 0), 2)
+    
+    cv2.imshow("Convex Hull of Scattered Points", canvas)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
