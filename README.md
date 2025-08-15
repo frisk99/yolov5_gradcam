@@ -237,3 +237,85 @@ int main() {
     cv2.imshow("Convex Hull of Scattered Points", canvas)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
+
+import cv2
+import numpy as np
+import matplotlib.pyplot as plt
+
+# --- 1. 创建一个示例图像 ---
+# 创建一个 500x500 的黑色背景图像
+image = np.zeros((500, 500), dtype=np.uint8)
+
+# 在图像上绘制一个白色的 "L" 形作为我们的目标轮廓
+# 这是一个相对复杂的形状，有尖角，能更好地展示频谱
+pts = np.array([[100, 100], [300, 100], [300, 150], [150, 150], [150, 300], [100, 300]], np.int32)
+cv2.fillPoly(image, [pts], 255)
+
+# --- 2. 查找轮廓 ---
+# cv2.RETR_EXTERNAL: 只检测最外层的轮廓
+# cv2.CHAIN_APPROX_NONE: 获取轮廓上所有的点，这对于精确的傅里葉分析很重要
+contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+
+# 检查是否找到了轮廓
+if not contours:
+    print("没有找到轮廓！")
+    exit()
+
+# 我们处理找到的第一个（也是最大的）轮廓
+contour = contours[0]
+
+# 创建一个彩色图像用于可视化轮廓
+contour_visual = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+cv2.drawContours(contour_visual, [contour], -1, (0, 255, 0), 3)
+
+# --- 3. 将轮廓点转换为复数序列 ---
+# contour 的形状是 (N, 1, 2)，N是点的数量。我们需要将其转换为 (N, 2)
+contour_2d = contour.squeeze()
+
+# 将 (x, y) 坐标转换为复数 x + iy
+# 这是傅里叶描述子的标准预处理步骤
+complex_contour = contour_2d[:, 0] + 1j * contour_2d[:, 1]
+
+# --- 4. 执行快速傅里叶变换 (FFT) ---
+fourier_coeffs = np.fft.fft(complex_contour)
+
+# --- 5. 计算频谱 (傅里叶系数的幅度) ---
+# 幅度表示了每个频率分量对形状贡献的大小
+spectrum = np.abs(fourier_coeffs)
+
+# --- 6. 可视化频谱图 ---
+# 通常，第一个系数 (f_coeffs[0]) 是直流分量，代表轮廓的质心。
+# 它的值通常非常大，会压缩其他分量的显示范围，所以我们通常在绘图时忽略它，
+# 或者从第二个系数开始绘制，以更好地观察定义形状的交流分量。
+# 我们这里只显示前50个频率分量，因为高频分量通常很快衰减到0。
+num_descriptors_to_show = 50
+plot_spectrum = spectrum[1:num_descriptors_to_show + 1]
+
+# 设置绘图
+plt.figure(figsize=(12, 6))
+
+# 子图1: 显示原始图像和轮廓
+plt.subplot(1, 2, 1)
+plt.imshow(contour_visual)
+plt.title('Original Contour')
+plt.axis('off')
+
+# 子图2: 显示频谱图
+plt.subplot(1, 2, 2)
+# 使用条形图更直观
+x_axis = range(1, len(plot_spectrum) + 1)
+plt.bar(x_axis, plot_spectrum, color='skyblue')
+plt.title('Fourier Descriptor Spectrum (First 50 Descriptors)')
+plt.xlabel('Frequency Index (Descriptor)')
+plt.ylabel('Magnitude')
+plt.grid(True, linestyle='--', alpha=0.6)
+
+# 调整布局并显示
+plt.tight_layout()
+plt.show()
+
+# 打印前10个频谱值
+print("Spectrum Magnitudes (starting from the 2nd coefficient):")
+for i, mag in enumerate(spectrum[1:11]):
+    print(f"  Descriptor {i+1}: {mag:.2f}")
+
