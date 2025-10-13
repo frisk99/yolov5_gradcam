@@ -63,44 +63,40 @@ Solve the custom dataset gradient not match.
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <cstdint> // 用于 int32_t, uint64_t 等
+#include <cstring> // 用于 memcpy
+#include <algorithm> // 用于 std::reverse
 
-// --- 协议定义 ---
-// 使用 #pragma pack 确保结构体在内存中是紧凑的，没有额外的填充字节
-#pragma pack(push, 1)
-// 客户端发来的请求包 (固定20字节)
-struct Request {
-    int32_t function_id;
-    double arg1;
-    double arg2;
-};
+// --- 字节序处理辅助函数 ---
 
-// 服务器发回的响应头 (固定8字节)
-struct ResponseHeader {
-    int32_t status;     // 0 = OK, 1 = Error
-    int32_t data_len;   // 后面跟随的数据长度
-};
-#pragma pack(pop)
-
-
-// --- 服务器端需要暴露的函数 ---
-double add(double a, double b) {
-    return a + b;
+// 检查主机字节序是否为小端
+bool is_little_endian() {
+    uint16_t x = 1;
+    return *(uint8_t*)&x == 1;
 }
 
-double subtract(double a, double b) {
-    return a - b;
+// double 类型的主机序和网络序（大端）转换
+double htond(double val) {
+    if (is_little_endian()) {
+        uint64_t temp;
+        memcpy(&temp, &val, sizeof(double));
+        temp = __builtin_bswap64(temp); // GCC/Clang 内置函数，效率高
+        memcpy(&val, &temp, sizeof(double));
+    }
+    return val;
 }
 
-std::string get_server_name() {
-    return "Simple C++ RPC Server";
+double ntohd(double val) {
+    return htond(val); // 转换是可逆的
 }
 
-// --- 网络辅助函数 ---
+
+// --- 网络通信辅助函数 ---
+
 // 从 socket 安全地读取指定长度的数据
 bool recv_all(int sock, void* buffer, size_t length) {
     char* ptr = static_cast<char*>(buffer);
     while (length > 0) {
-        int bytes_received = recv(sock, ptr, length, 0);
+        ssize_t bytes_received = recv(sock, ptr, length, 0);
         if (bytes_received <= 0) {
             // 连接关闭或发生错误
             return false;
@@ -115,7 +111,7 @@ bool recv_all(int sock, void* buffer, size_t length) {
 bool send_all(int sock, const void* buffer, size_t length) {
     const char* ptr = static_cast<const char*>(buffer);
     while (length > 0) {
-        int bytes_sent = send(sock, ptr, length, 0);
+        ssize_t bytes_sent = send(sock, ptr, length, 0);
         if (bytes_sent < 0) {
             // 发生错误
             return false;
@@ -126,39 +122,65 @@ bool send_all(int sock, const void* buffer, size_t length) {
     return true;
 }
 
-// double 类型的主机序和网络序转换
-double ntohd(double val) {
-    uint64_t temp;
-    static_assert(sizeof(double) == sizeof(uint64_t), "Size of double is not 64 bits");
-    memcpy(&temp, &val, sizeof(double));
-    temp = be64toh(temp); // be64toh: Big-Endian 64 to Host
-    memcpy(&val, &temp, sizeof(double));
-    return val;
+// 接收一个字符串 (先收长度，再收内容)
+bool recv_string(int sock, std::string& s) {
+    uint32_t len_net;
+    if (!recv_all(sock, &len_net, sizeof(len_net))) return false;
+    uint32_t len = ntohl(len_net);
+    if (len > 0) { // 只有当长度大于0时才接收
+        std::vector<char> buffer(len);
+        if (!recv_all(sock, buffer.data(), len)) return false;
+        s.assign(buffer.begin(), buffer.end());
+    } else {
+        s.clear();
+    }
+    return true;
 }
 
-double htond(double val) {
-    uint64_t temp;
-    static_assert(sizeof(double) == sizeof(uint64_t), "Size of double is not 64 bits");
-    memcpy(&temp, &val, sizeof(double));
-    temp = htobe64(temp); // htobe64: Host to Big-Endian 64
-    memcpy(&val, &temp, sizeof(double));
-    return val;
+// 发送一个字符串
+bool send_string(int sock, const std::string& s) {
+    uint32_t len_net = htonl(s.length());
+    if (!send_all(sock, &len_net, sizeof(len_net))) return false;
+    if (!s.empty()) {
+        if (!send_all(sock, s.c_str(), s.length())) return false;
+    }
+    return true;
+}
+
+
+// --- 服务器端需要暴露的函数 ---
+
+double add(double a, double b) {
+    return a + b;
+}
+
+std::string concat(const std::string& s1, const std::string& s2) {
+    return s1 + " " + s2;
+}
+
+std::string get_server_name() {
+    return "Advanced C++ RPC Server";
 }
 
 
 int main() {
+    // --- Socket 初始化 ---
     int server_fd, new_socket;
     struct sockaddr_in address;
-    int opt = 1;
     int addrlen = sizeof(address);
 
-    // 创建 socket 文件描述符
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
     
-    // 绑定 socket 到端口 8080
+    // 允许地址重用，避免 "Address already in use" 错误
+    int opt = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+        perror("setsockopt");
+        exit(EXIT_FAILURE);
+    }
+    
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(8080);
@@ -168,83 +190,95 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    // 监听端口
     if (listen(server_fd, 3) < 0) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Binary RPC Server is listening on port 8080..." << std::endl;
+    std::cout << "Advanced RPC Server is listening on port 8080..." << std::endl;
 
-    // 接受一个客户端连接
     if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
         perror("accept");
         exit(EXIT_FAILURE);
     }
     std::cout << "Client connected." << std::endl;
 
-    // 主循环: 处理来自客户端的请求
+    // --- 主循环：处理请求 ---
     while (true) {
-        Request req;
-        // 接收一个完整的20字节请求包
-        if (!recv_all(new_socket, &req, sizeof(Request))) {
+        uint32_t function_id_net;
+        // 1. 首先只接收4字节的 function_id
+        if (!recv_all(new_socket, &function_id_net, sizeof(uint32_t))) {
             std::cout << "Client disconnected." << std::endl;
             break;
         }
-
-        // 将接收到的数据从网络字节序转换为主机字节序
-        req.function_id = ntohl(req.function_id);
-        req.arg1 = ntohd(req.arg1);
-        req.arg2 = ntohd(req.arg2);
-
+        uint32_t function_id = ntohl(function_id_net);
+        
+        // 定义响应头
+        struct ResponseHeader {
+            int32_t status; // 0 for OK, 1 for Error
+        };
         ResponseHeader resp_header;
-        resp_header.status = 0; // 默认成功
+        resp_header.status = 0; // 默认为成功
 
-        // 根据 function_id 调用相应的函数
-        switch (req.function_id) {
-            case 1: { // add
-                double result = add(req.arg1, req.arg2);
-                result = htond(result); // 转换结果为网络字节序
-                resp_header.data_len = sizeof(double);
+        // 2. 根据 function_id，接收对应参数并执行函数
+        switch (function_id) {
+            case 1: { // add(double, double)
+                double arg1_net, arg2_net;
+                if (!recv_all(new_socket, &arg1_net, sizeof(double)) || !recv_all(new_socket, &arg2_net, sizeof(double))) {
+                    std::cerr << "Failed to receive double arguments." << std::endl;
+                    goto connection_lost;
+                }
+                
+                double result = add(ntohd(arg1_net), ntohd(arg2_net));
+                
+                // 发送响应
                 resp_header.status = htonl(resp_header.status);
-                resp_header.data_len = htonl(resp_header.data_len);
+                double result_net = htond(result);
                 send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_all(new_socket, &result, sizeof(double));
+                send_all(new_socket, &result_net, sizeof(double));
                 break;
             }
-            case 2: { // subtract
-                double result = subtract(req.arg1, req.arg2);
-                result = htond(result);
-                resp_header.data_len = sizeof(double);
+            case 2: { // concat(string, string)
+                std::string s1, s2;
+                if (!recv_string(new_socket, s1) || !recv_string(new_socket, s2)) {
+                    std::cerr << "Failed to receive string arguments." << std::endl;
+                    goto connection_lost;
+                }
+                
+                std::string result = concat(s1, s2);
+                
+                // 发送响应
                 resp_header.status = htonl(resp_header.status);
-                resp_header.data_len = htonl(resp_header.data_len);
                 send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_all(new_socket, &result, sizeof(double));
+                send_string(new_socket, result);
                 break;
             }
-            case 3: { // get_server_name
+            case 3: { // get_server_name()
                 std::string name = get_server_name();
-                resp_header.data_len = name.length();
+                
+                // 发送响应
                 resp_header.status = htonl(resp_header.status);
-                resp_header.data_len = htonl(resp_header.data_len);
                 send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_all(new_socket, name.c_str(), name.length());
+                send_string(new_socket, name);
                 break;
             }
-            default: { // 未知函数
+            default: {
+                std::cerr << "Received unknown function ID: " << function_id << std::endl;
+                resp_header.status = 1; // 设置错误状态
+                
                 std::string error_msg = "Unknown function ID";
-                resp_header.status = 1; // 错误状态
-                resp_header.data_len = error_msg.length();
+                
+                // 发送错误响应
                 resp_header.status = htonl(resp_header.status);
-                resp_header.data_len = htonl(resp_header.data_len);
                 send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_all(new_socket, error_msg.c_str(), error_msg.length());
+                send_string(new_socket, error_msg);
                 break;
             }
         }
     }
 
-    // 关闭连接
+connection_lost: // goto 标签，用于跳出循环
+    std::cout << "Closing client connection..." << std::endl;
     close(new_socket);
     close(server_fd);
 
