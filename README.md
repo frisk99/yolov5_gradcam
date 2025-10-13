@@ -54,36 +54,70 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
+
 #include <iostream>
-#include <vector>
 #include <string>
+#include <vector>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <algorithm>
-#include <cstdint> // For fixed-width integers
+#include <arpa/inet.h>
+#include <cstdint> // 用于 int32_t, uint64_t 等
 
-#include <opencv2/opencv.hpp>
-
-// 确保结构体在内存中是紧凑的，没有填充字节
-// 这对于与 Python struct 模块的兼容性至关重要
+// --- 协议定义 ---
+// 使用 #pragma pack 确保结构体在内存中是紧凑的，没有额外的填充字节
 #pragma pack(push, 1)
-struct PacketHeader {
-    int32_t bbox_x;
-    int32_t bbox_y;
-    int32_t bbox_width;
-    int32_t bbox_height;
-    int64_t image_size;
+// 客户端发来的请求包 (固定20字节)
+struct Request {
+    int32_t function_id;
+    double arg1;
+    double arg2;
+};
+
+// 服务器发回的响应头 (固定8字节)
+struct ResponseHeader {
+    int32_t status;     // 0 = OK, 1 = Error
+    int32_t data_len;   // 后面跟随的数据长度
 };
 #pragma pack(pop)
 
-// 函数：发送一个完整的消息
-bool send_all(int socket, const void* buffer, size_t length) {
-    const char* ptr = (const char*)buffer;
+
+// --- 服务器端需要暴露的函数 ---
+double add(double a, double b) {
+    return a + b;
+}
+
+double subtract(double a, double b) {
+    return a - b;
+}
+
+std::string get_server_name() {
+    return "Simple C++ RPC Server";
+}
+
+// --- 网络辅助函数 ---
+// 从 socket 安全地读取指定长度的数据
+bool recv_all(int sock, void* buffer, size_t length) {
+    char* ptr = static_cast<char*>(buffer);
     while (length > 0) {
-        int bytes_sent = send(socket, ptr, length, 0);
-        if (bytes_sent < 1) {
+        int bytes_received = recv(sock, ptr, length, 0);
+        if (bytes_received <= 0) {
+            // 连接关闭或发生错误
+            return false;
+        }
+        ptr += bytes_received;
+        length -= bytes_received;
+    }
+    return true;
+}
+
+// 向 socket 安全地发送指定长度的数据
+bool send_all(int sock, const void* buffer, size_t length) {
+    const char* ptr = static_cast<const char*>(buffer);
+    while (length > 0) {
+        int bytes_sent = send(sock, ptr, length, 0);
+        if (bytes_sent < 0) {
+            // 发生错误
             return false;
         }
         ptr += bytes_sent;
@@ -92,106 +126,127 @@ bool send_all(int socket, const void* buffer, size_t length) {
     return true;
 }
 
-int main() {
-    // --- 1. 获取图片列表 (与之前相同) ---
-    std::string image_dir = "images/";
-    std::vector<std::string> image_paths;
-    // ... (此处代码与上一版完全相同，故省略)
-    DIR *dir;
-    struct dirent *ent;
-    if ((dir = opendir(image_dir.c_str())) != NULL) {
-        while ((ent = readdir(dir)) != NULL) {
-            std::string filename = ent->d_name;
-            if (filename.find(".jpg") != std::string::npos || filename.find(".png") != std::string::npos) {
-                image_paths.push_back(image_dir + filename);
-            }
-        }
-        closedir(dir);
-        std::sort(image_paths.begin(), image_paths.end());
-    } else {
-        perror("Could not open image directory");
-        return 1;
-    }
-    if (image_paths.empty()) {
-        std::cerr << "No images found in directory." << std::endl;
-        return 1;
-    }
+// double 类型的主机序和网络序转换
+double ntohd(double val) {
+    uint64_t temp;
+    static_assert(sizeof(double) == sizeof(uint64_t), "Size of double is not 64 bits");
+    memcpy(&temp, &val, sizeof(double));
+    temp = be64toh(temp); // be64toh: Big-Endian 64 to Host
+    memcpy(&val, &temp, sizeof(double));
+    return val;
+}
 
-    // --- 2. 创建并配置 Socket (与之前相同) ---
+double htond(double val) {
+    uint64_t temp;
+    static_assert(sizeof(double) == sizeof(uint64_t), "Size of double is not 64 bits");
+    memcpy(&temp, &val, sizeof(double));
+    temp = htobe64(temp); // htobe64: Host to Big-Endian 64
+    memcpy(&val, &temp, sizeof(double));
+    return val;
+}
+
+
+int main() {
     int server_fd, new_socket;
     struct sockaddr_in address;
+    int opt = 1;
     int addrlen = sizeof(address);
-    // ... (此处代码与上一版完全相同，故省略)
+
+    // 创建 socket 文件描述符
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
+    
+    // 绑定 socket 到端口 8080
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(8080);
+
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind failed");
         exit(EXIT_FAILURE);
     }
+
+    // 监听端口
     if (listen(server_fd, 3) < 0) {
         perror("listen");
         exit(EXIT_FAILURE);
     }
-    std::cout << "Server listening on port 8080..." << std::endl;
+
+    std::cout << "Binary RPC Server is listening on port 8080..." << std::endl;
+
+    // 接受一个客户端连接
     if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
         perror("accept");
         exit(EXIT_FAILURE);
     }
     std::cout << "Client connected." << std::endl;
 
-
-    // --- 3. 循环发送图片和Bbox数据 ---
-    int image_index = 0;
+    // 主循环: 处理来自客户端的请求
     while (true) {
-        std::string current_image_path = image_paths[image_index];
-        cv::Mat image = cv::imread(current_image_path);
-        if (image.empty()) {
-            // ... (与之前相同)
-            image_index = (image_index + 1) % image_paths.size();
-            continue;
-        }
-
-        // 将图片编码为 JPEG 格式
-        std::vector<uchar> encoded_image;
-        cv::imencode(".jpg", image, encoded_image, {cv::IMWRITE_JPEG_QUALITY, 90});
-        
-        // *** 新增：创建并填充 Header ***
-        PacketHeader header;
-        
-        // 为了演示，我们创建一个动态变化的虚拟Bbox
-        // 在实际应用中，这些值应来自您的目标检测算法
-        header.bbox_x = 50 + (image_index % 10) * 10;
-        header.bbox_y = 50;
-        header.bbox_width = 100 + (image_index % 5) * 5;
-        header.bbox_height = 100;
-        header.image_size = encoded_image.size();
-
-        // *** 修改发送逻辑 ***
-        // 1. 发送固定大小的 Header
-        if (!send_all(new_socket, &header, sizeof(PacketHeader))) {
-            std::cerr << "Failed to send header. Client disconnected." << std::endl;
+        Request req;
+        // 接收一个完整的20字节请求包
+        if (!recv_all(new_socket, &req, sizeof(Request))) {
+            std::cout << "Client disconnected." << std::endl;
             break;
         }
 
-        // 2. 发送可变大小的图片数据
-        if (!send_all(new_socket, encoded_image.data(), header.image_size)) {
-            std::cerr << "Failed to send image data. Client disconnected." << std::endl;
-            break;
+        // 将接收到的数据从网络字节序转换为主机字节序
+        req.function_id = ntohl(req.function_id);
+        req.arg1 = ntohd(req.arg1);
+        req.arg2 = ntohd(req.arg2);
+
+        ResponseHeader resp_header;
+        resp_header.status = 0; // 默认成功
+
+        // 根据 function_id 调用相应的函数
+        switch (req.function_id) {
+            case 1: { // add
+                double result = add(req.arg1, req.arg2);
+                result = htond(result); // 转换结果为网络字节序
+                resp_header.data_len = sizeof(double);
+                resp_header.status = htonl(resp_header.status);
+                resp_header.data_len = htonl(resp_header.data_len);
+                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
+                send_all(new_socket, &result, sizeof(double));
+                break;
+            }
+            case 2: { // subtract
+                double result = subtract(req.arg1, req.arg2);
+                result = htond(result);
+                resp_header.data_len = sizeof(double);
+                resp_header.status = htonl(resp_header.status);
+                resp_header.data_len = htonl(resp_header.data_len);
+                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
+                send_all(new_socket, &result, sizeof(double));
+                break;
+            }
+            case 3: { // get_server_name
+                std::string name = get_server_name();
+                resp_header.data_len = name.length();
+                resp_header.status = htonl(resp_header.status);
+                resp_header.data_len = htonl(resp_header.data_len);
+                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
+                send_all(new_socket, name.c_str(), name.length());
+                break;
+            }
+            default: { // 未知函数
+                std::string error_msg = "Unknown function ID";
+                resp_header.status = 1; // 错误状态
+                resp_header.data_len = error_msg.length();
+                resp_header.status = htonl(resp_header.status);
+                resp_header.data_len = htonl(resp_header.data_len);
+                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
+                send_all(new_socket, error_msg.c_str(), error_msg.length());
+                break;
+            }
         }
-
-        std::cout << "Sent " << current_image_path << " (Image: " << header.image_size 
-                  << " bytes, Bbox: x=" << header.bbox_x << ")" << std::endl;
-
-        image_index = (image_index + 1) % image_paths.size();
-        usleep(100000); // 100ms
     }
 
+    // 关闭连接
     close(new_socket);
     close(server_fd);
+
     return 0;
 }
