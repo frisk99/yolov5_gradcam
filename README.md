@@ -54,136 +54,191 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-
+// socket_server_no_json.cpp
 #include <iostream>
 #include <string>
 #include <vector>
+#include <sstream>
+#include <thread>
+#include <mutex>
+#include <cstring>
+
+// For socket programming
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <unistd.h>
+#include <unistd.h> // for close()
 #include <arpa/inet.h>
-#include <cstdint> // 用于 int32_t, uint64_t 等
-#include <cstring> // 用于 memcpy
-#include <algorithm> // 用于 std::reverse
 
-// --- 字节序处理辅助函数 ---
+#define PORT 8080
+#define BUFFER_SIZE 4096
 
-// 检查主机字节序是否为小端
-bool is_little_endian() {
-    uint16_t x = 1;
-    return *(uint8_t*)&x == 1;
-}
+// A mutex for thread-safe cout
+std::mutex cout_mutex;
 
-// double 类型的主机序和网络序（大端）转换
-double htond(double val) {
-    if (is_little_endian()) {
-        uint64_t temp;
-        memcpy(&temp, &val, sizeof(double));
-        temp = __builtin_bswap64(temp); // GCC/Clang 内置函数，效率高
-        memcpy(&val, &temp, sizeof(double));
-    }
-    return val;
-}
+// Forward declarations
+void adduserinfo(const std::vector<std::string>& args);
+void deleteusrinfo(const std::vector<std::string>& args);
+std::string subscribeimage();
+void unsubscribeimage();
 
-double ntohd(double val) {
-    return htond(val); // 转换是可逆的
-}
+// Client handler function
+void handle_client(int client_socket) {
+    char buffer[BUFFER_SIZE] = {0};
+    
+    const char* welcome_msg = "Connection to server successful.\n";
+    send(client_socket, welcome_msg, strlen(welcome_msg), 0);
 
+    while (true) {
+        memset(buffer, 0, BUFFER_SIZE);
+        int bytes_received = recv(client_socket, buffer, BUFFER_SIZE, 0);
 
-// --- 网络通信辅助函数 ---
-
-// 从 socket 安全地读取指定长度的数据
-bool recv_all(int sock, void* buffer, size_t length) {
-    char* ptr = static_cast<char*>(buffer);
-    while (length > 0) {
-        ssize_t bytes_received = recv(sock, ptr, length, 0);
         if (bytes_received <= 0) {
-            // 连接关闭或发生错误
-            return false;
+            {
+                std::lock_guard<std::mutex> lock(cout_mutex);
+                std::cout << "Client disconnected. Socket fd: " << client_socket << std::endl;
+            }
+            close(client_socket);
+            return;
         }
-        ptr += bytes_received;
-        length -= bytes_received;
-    }
-    return true;
-}
+        
+        std::string received_data(buffer, bytes_received);
+        std::stringstream ss(received_data);
+        std::string command;
+        ss >> command;
 
-// 向 socket 安全地发送指定长度的数据
-bool send_all(int sock, const void* buffer, size_t length) {
-    const char* ptr = static_cast<const char*>(buffer);
-    while (length > 0) {
-        ssize_t bytes_sent = send(sock, ptr, length, 0);
-        if (bytes_sent < 0) {
-            // 发生错误
-            return false;
+        std::vector<std::string> args;
+        std::string arg;
+        while (ss >> arg) {
+            args.push_back(arg);
         }
-        ptr += bytes_sent;
-        length -= bytes_sent;
+
+        {
+            std::lock_guard<std::mutex> lock(cout_mutex);
+            std::cout << "Received command from client " << client_socket << ": " << command << std::endl;
+        }
+
+        std::string response = "OK\n";
+
+        if (command == "adduserinfo") {
+            if (args.size() == 3) {
+                adduserinfo(args);
+            } else {
+                response = "ERROR: adduserinfo requires 3 arguments (name, image, id).\n";
+            }
+        } else if (command == "deleteusrinfo") {
+            if (args.size() == 2) {
+                deleteusrinfo(args);
+            } else {
+                response = "ERROR: deleteusrinfo requires 2 arguments (name, id).\n";
+            }
+        } else if (command == "subscribeimage") {
+            response = subscribeimage() + "\n";
+        } else if (command == "unsubscribeimage") {
+            unsubscribeimage();
+        } else {
+            response = "ERROR: Unknown command '" + command + "'\n";
+        }
+
+        send(client_socket, response.c_str(), response.length(), 0);
     }
-    return true;
 }
 
-// 接收一个字符串 (先收长度，再收内容)
-bool recv_string(int sock, std::string& s) {
-    uint32_t len_net;
-    if (!recv_all(sock, &len_net, sizeof(len_net))) return false;
-    uint32_t len = ntohl(len_net);
-    if (len > 0) { // 只有当长度大于0时才接收
-        std::vector<char> buffer(len);
-        if (!recv_all(sock, buffer.data(), len)) return false;
-        s.assign(buffer.begin(), buffer.end());
-    } else {
-        s.clear();
+// --- Function Implementations ---
+
+void adduserinfo(const std::vector<std::string>& args) {
+    std::string name = args[0];
+    std::string image = args[1];
+    int id = std::stoi(args[2]);
+    
+    std::lock_guard<std::mutex> lock(cout_mutex);
+    std::cout << "[INFO] Adding user. Name: " << name << ", Image: " << image << ", ID: " << id << std::endl;
+}
+
+void deleteusrinfo(const std::vector<std::string>& args) {
+    std::string name = args[0];
+    int id = std::stoi(args[1]);
+
+    std::lock_guard<std::mutex> lock(cout_mutex);
+    std::cout << "[INFO] Deleting user. Name: " << name << ", ID: " << id << std::endl;
+}
+
+/**
+ * @brief Manually constructs a JSON string with image data.
+ * This function creates a JSON object without any external libraries.
+ * @return A std::string containing the JSON data.
+ */
+std::string subscribeimage() {
+    std::lock_guard<std::mutex> lock(cout_mutex);
+    std::cout << "[INFO] Client subscribed to image stream. Sending data." << std::endl;
+    
+    // Data to be sent
+    std::vector<int> ids = {101, 102, 103};
+    std::vector<std::string> names = {"person_A", "car_B", "person_C"};
+    std::vector<int> bboxes = {10, 20, 50, 60, 100, 120, 80, 40, 200, 210, 75, 75};
+
+    std::stringstream json_ss;
+    
+    json_ss << "{";
+    
+    // 1. Add integer array "ids"
+    json_ss << "\"ids\":[";
+    for (size_t i = 0; i < ids.size(); ++i) {
+        json_ss << ids[i];
+        if (i < ids.size() - 1) {
+            json_ss << ",";
+        }
     }
-    return true;
-}
-
-// 发送一个字符串
-bool send_string(int sock, const std::string& s) {
-    uint32_t len_net = htonl(s.length());
-    if (!send_all(sock, &len_net, sizeof(len_net))) return false;
-    if (!s.empty()) {
-        if (!send_all(sock, s.c_str(), s.length())) return false;
+    json_ss << "],";
+    
+    // 2. Add string array "names"
+    json_ss << "\"names\":[";
+    for (size_t i = 0; i < names.size(); ++i) {
+        json_ss << "\"" << names[i] << "\""; // Strings in JSON must be in double quotes
+        if (i < names.size() - 1) {
+            json_ss << ",";
+        }
     }
-    return true;
+    json_ss << "],";
+    
+    // 3. Add integer array "bboxes"
+    json_ss << "\"bboxes\":[";
+    for (size_t i = 0; i < bboxes.size(); ++i) {
+        json_ss << bboxes[i];
+        if (i < bboxes.size() - 1) {
+            json_ss << ",";
+        }
+    }
+    json_ss << "]";
+    
+    json_ss << "}";
+    
+    return json_ss.str();
 }
 
-
-// --- 服务器端需要暴露的函数 ---
-
-double add(double a, double b) {
-    return a + b;
-}
-
-std::string concat(const std::string& s1, const std::string& s2) {
-    return s1 + " " + s2;
-}
-
-std::string get_server_name() {
-    return "Advanced C++ RPC Server";
+void unsubscribeimage() {
+    std::lock_guard<std::mutex> lock(cout_mutex);
+    std::cout << "[INFO] Client unsubscribed from image stream." << std::endl;
 }
 
 
 int main() {
-    // --- Socket 初始化 ---
-    int server_fd, new_socket;
+    int server_fd;
     struct sockaddr_in address;
-    int addrlen = sizeof(address);
+    int opt = 1;
+    socklen_t addrlen = sizeof(address);
 
     if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
         perror("socket failed");
         exit(EXIT_FAILURE);
     }
-    
-    // 允许地址重用，避免 "Address already in use" 错误
-    int opt = 1;
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt))) {
+
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
         perror("setsockopt");
         exit(EXIT_FAILURE);
     }
-    
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(8080);
+    address.sin_port = htons(PORT);
 
     if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
         perror("bind failed");
@@ -195,92 +250,27 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Advanced RPC Server is listening on port 8080..." << std::endl;
+    std::cout << "Server listening on port " << PORT << std::endl;
 
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
-        perror("accept");
-        exit(EXIT_FAILURE);
-    }
-    std::cout << "Client connected." << std::endl;
-
-    // --- 主循环：处理请求 ---
     while (true) {
-        uint32_t function_id_net;
-        // 1. 首先只接收4字节的 function_id
-        if (!recv_all(new_socket, &function_id_net, sizeof(uint32_t))) {
-            std::cout << "Client disconnected." << std::endl;
-            break;
+        int new_socket = accept(server_fd, (struct sockaddr *)&address, &addrlen);
+        if (new_socket < 0) {
+            perror("accept");
+            continue;
         }
-        uint32_t function_id = ntohl(function_id_net);
         
-        // 定义响应头
-        struct ResponseHeader {
-            int32_t status; // 0 for OK, 1 for Error
-        };
-        ResponseHeader resp_header;
-        resp_header.status = 0; // 默认为成功
-
-        // 2. 根据 function_id，接收对应参数并执行函数
-        switch (function_id) {
-            case 1: { // add(double, double)
-                double arg1_net, arg2_net;
-                if (!recv_all(new_socket, &arg1_net, sizeof(double)) || !recv_all(new_socket, &arg2_net, sizeof(double))) {
-                    std::cerr << "Failed to receive double arguments." << std::endl;
-                    goto connection_lost;
-                }
-                
-                double result = add(ntohd(arg1_net), ntohd(arg2_net));
-                
-                // 发送响应
-                resp_header.status = htonl(resp_header.status);
-                double result_net = htond(result);
-                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_all(new_socket, &result_net, sizeof(double));
-                break;
-            }
-            case 2: { // concat(string, string)
-                std::string s1, s2;
-                if (!recv_string(new_socket, s1) || !recv_string(new_socket, s2)) {
-                    std::cerr << "Failed to receive string arguments." << std::endl;
-                    goto connection_lost;
-                }
-                
-                std::string result = concat(s1, s2);
-                
-                // 发送响应
-                resp_header.status = htonl(resp_header.status);
-                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_string(new_socket, result);
-                break;
-            }
-            case 3: { // get_server_name()
-                std::string name = get_server_name();
-                
-                // 发送响应
-                resp_header.status = htonl(resp_header.status);
-                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_string(new_socket, name);
-                break;
-            }
-            default: {
-                std::cerr << "Received unknown function ID: " << function_id << std::endl;
-                resp_header.status = 1; // 设置错误状态
-                
-                std::string error_msg = "Unknown function ID";
-                
-                // 发送错误响应
-                resp_header.status = htonl(resp_header.status);
-                send_all(new_socket, &resp_header, sizeof(ResponseHeader));
-                send_string(new_socket, error_msg);
-                break;
-            }
+        {
+            std::lock_guard<std::mutex> lock(cout_mutex);
+            char client_ip[INET_ADDRSTRLEN];
+            inet_ntop(AF_INET, &address.sin_addr, client_ip, INET_ADDRSTRLEN);
+            std::cout << "New connection from " << client_ip << ", socket fd: " << new_socket << std::endl;
         }
+
+        std::thread client_thread(handle_client, new_socket);
+        client_thread.detach();
     }
 
-connection_lost: // goto 标签，用于跳出循环
-    std::cout << "Closing client connection..." << std::endl;
-    close(new_socket);
     close(server_fd);
-
     return 0;
 }
+
