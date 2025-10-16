@@ -55,133 +55,140 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
-#include <iostream>
-#include <fstream>
-#include <vector>
-#include <string>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <dirent.h>
-#include <algorithm>
+import streamlit as st
+import socket
+import numpy as np
+import cv2
+import struct
+import time
 
-#include <opencv2/opencv.hpp>
+# --- 页面配置 ---
+st.set_page_config(
+    page_title="实时图像流播放器",
+    page_icon="📹"
+)
 
-// 函数：发送一个完整的消息（先发送大小，再发送数据）
-bool send_all(int socket, const void* buffer, size_t length) {
-    const char* ptr = (const char*)buffer;
-    while (length > 0) {
-        int bytes_sent = send(socket, ptr, length, 0);
-        if (bytes_sent < 1) {
-            return false;
-        }
-        ptr += bytes_sent;
-        length -= bytes_sent;
-    }
-    return true;
-}
+st.title("📹 C++ 服务器图像流播放")
 
-int main() {
-    // --- 1. 获取图片列表 ---
-    std::string image_dir = "images/";
-    std::vector<std::string> image_paths;
-    DIR *dir;
-    struct dirent *ent;
-    if ((dir = opendir(image_dir.c_str())) != NULL) {
-        while ((ent = readdir(dir)) != NULL) {
-            std::string filename = ent->d_name;
-            if (filename.find(".jpg") != std::string::npos || filename.find(".png") != std::string::npos) {
-                image_paths.push_back(image_dir + filename);
-            }
-        }
-        closedir(dir);
-        std::sort(image_paths.begin(), image_paths.end()); // 确保图片按顺序播放
-    } else {
-        std::cerr << "Error: Could not open image directory." << std::endl;
-        return 1;
-    }
+# --- Socket 连接参数 ---
+HOST = '127.0.0.1'  # C++ 服务器的 IP 地址
+PORT = 8080         # C++ 服务器的端口
 
-    if (image_paths.empty()) {
-        std::cerr << "Error: No images found in the directory." << std::endl;
-        return 1;
-    }
+# 使用 Streamlit 的 Session State 来存储 socket 对象，避免每次刷新都重连
+if 'sock' not in st.session_state:
+    st.session_state.sock = None
 
-    // --- 2. 创建并配置 Socket ---
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int opt = 1;
-    int addrlen = sizeof(address);
+def connect_to_server():
+    """建立到服务器的连接"""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((HOST, PORT))
+        st.session_state.sock = sock
+        return True
+    except ConnectionRefusedError:
+        st.error(f"连接被拒绝。请确保 C++ 服务器正在运行于 {HOST}:{PORT}。")
+        st.session_state.sock = None
+        return False
+    except Exception as e:
+        st.error(f"连接失败: {e}")
+        st.session_state.sock = None
+        return False
 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("socket failed");
-        exit(EXIT_FAILURE);
-    }
+def recv_all(sock, count):
+    """确保接收到指定字节数的数据"""
+    buf = b''
+    while len(buf) < count:
+        new_buf = sock.recv(count - len(buf))
+        if not new_buf:
+            return None
+        buf += new_buf
+    return buf
 
-    address.sin_family = AF_INET;
-    address.sin_addr.s_addr = INADDR_ANY;
-    address.sin_port = htons(8080);
+def main():
+    # --- 侧边栏控制 ---
+    st.sidebar.header("控制面板")
+    
+    if st.sidebar.button('连接服务器', key='connect'):
+        if st.session_state.sock is None:
+            if connect_to_server():
+                st.sidebar.success("已成功连接到服务器！")
+            else:
+                st.sidebar.error("连接失败。")
+        else:
+            st.sidebar.warning("已经连接。如需重连，请先断开。")
 
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("bind failed");
-        exit(EXIT_FAILURE);
-    }
+    if st.sidebar.button('开始播放', key='play', disabled=(st.session_state.sock is None)):
+        st.session_state.is_playing = True
 
-    if (listen(server_fd, 3) < 0) {
-        perror("listen");
-        exit(EXIT_FAILURE);
-    }
+    if st.sidebar.button('停止播放', key='stop'):
+        st.session_state.is_playing = False
+        
+    if st.sidebar.button('断开连接', key='disconnect'):
+        if st.session_state.sock:
+            st.session_state.sock.close()
+            st.session_state.sock = None
+            st.session_state.is_playing = False
+            st.sidebar.info("已断开连接。")
 
-    std::cout << "Server listening on port 8080..." << std::endl;
+    # 初始化播放状态
+    if 'is_playing' not in st.session_state:
+        st.session_state.is_playing = False
 
-    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
-        perror("accept");
-        exit(EXIT_FAILURE);
-    }
-    std::cout << "Client connected." << std::endl;
+    # --- 主显示区域 ---
+    image_placeholder = st.empty()
+    image_placeholder.info("请先连接服务器，然后点击 '开始播放'。")
 
-    // --- 3. 循环发送图片 ---
-    int image_index = 0;
-    while (true) {
-        // 读取图片
-        std::string current_image_path = image_paths[image_index];
-        cv::Mat image = cv::imread(current_image_path);
-        if (image.empty()) {
-            std::cerr << "Warning: Could not read image: " << current_image_path << std::endl;
-            image_index = (image_index + 1) % image_paths.size();
-            continue;
-        }
+    if st.session_state.get('is_playing') and st.session_state.sock:
+        try:
+            while st.session_state.is_playing:
+                # 1. 接收图像大小 (long 类型，8 字节)
+                size_data = recv_all(st.session_state.sock, 8)
+                if size_data is None:
+                    st.warning("与服务器的连接已断开。")
+                    st.session_state.is_playing = False
+                    st.session_state.sock = None
+                    break
+                
+                # 解包得到图像大小
+                image_size = struct.unpack('<q', size_data)[0]
 
-        // 将图片编码为 JPEG 格式
-        std::vector<uchar> encoded_image;
-        std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 90}; // 设定JPEG压缩质量
-        cv::imencode(".jpg", image, encoded_image, params);
+                # 2. 接收图像数据
+                image_data = recv_all(st.session_state.sock, image_size)
+                if image_data is None:
+                    st.warning("与服务器的连接已断开。")
+                    st.session_state.is_playing = False
+                    st.session_state.sock = None
+                    break
 
-        // 准备发送数据
-        long image_size = encoded_image.size();
+                # 3. 解码并显示图像
+                # 将字节数据转换为 numpy 数组
+                nparr = np.frombuffer(image_data, np.uint8)
+                # 从数组解码图像
+                img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        // 首先发送图片数据的大小
-        if (!send_all(new_socket, &image_size, sizeof(image_size))) {
-            std::cerr << "Failed to send image size. Client disconnected." << std::endl;
-            break;
-        }
+                if img_np is not None:
+                    # OpenCV 读取的格式是 BGR，需要转换为 RGB 以在网页上正确显示
+                    img_rgb = cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB)
+                    image_placeholder.image(img_rgb, caption="实时视频流", use_column_width=True)
+                else:
+                    st.error("解码图像失败！")
+                
+                # 控制刷新率，给 Streamlit 一点时间来渲染
+                time.sleep(0.01)
 
-        // 然后发送图片数据本身
-        if (!send_all(new_socket, encoded_image.data(), image_size)) {
-            std::cerr << "Failed to send image data. Client disconnected." << std::endl;
-            break;
-        }
+        except (ConnectionResetError, BrokenPipeError):
+            st.error("与服务器的连接被重置。请重新连接。")
+            st.session_state.sock.close()
+            st.session_state.sock = None
+            st.session_state.is_playing = False
+        except Exception as e:
+            st.error(f"发生未知错误: {e}")
+            if st.session_state.sock:
+                st.session_state.sock.close()
+            st.session_state.sock = None
+            st.session_state.is_playing = False
 
-        std::cout << "Sent " << current_image_path << " (" << image_size << " bytes)" << std::endl;
 
-        // 切换到下一张图片
-        image_index = (image_index + 1) % image_paths.size();
+if __name__ == '__main__':
+    main()
 
-        // 控制发送速率，例如每秒10帧
-        usleep(100000); // 100ms
-    }
-
-    close(new_socket);
-    close(server_fd);
-
-    return 0;
-}
