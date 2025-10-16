@@ -55,157 +55,202 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
-import streamlit as st
-import socket
-import struct
-import io
-import time
-from PIL import Image
+#include <iostream>
+#include <string>
+#include <vector>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <unistd.h>
+#include <opencv2/opencv.hpp>
 
-# 初始化 session state
-if 'subscribed' not in st.session_state:
-    st.session_state.subscribed = False
-if 'client_socket' not in st.session_state:
-    st.session_state.client_socket = None
+// 使用原子布尔变量来安全地跨线程共享订阅状态
+std::atomic<bool> is_subscribed(false);
 
-def connect_to_server():
-    """连接到服务器并将其存储在 session_state 中"""
-    if st.session_state.client_socket is None:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.connect(('localhost', 8080))
-            st.session_state.client_socket = sock
-            st.info("成功连接到服务器。")
-        except ConnectionRefusedError:
-            st.error("连接被拒绝。请确保C++服务器正在运行。")
-            st.session_state.client_socket = None
-            st.session_state.subscribed = False
+// (发送和接收数据的辅助函数保持不变)
+bool send_data(int sock, const void* data, size_t size) {
+    // MSG_NOSIGNAL 防止在客户端断开连接时程序因 SIGPIPE 信号而崩溃
+    ssize_t sent_bytes = send(sock, data, size, MSG_NOSIGNAL);
+    if (sent_bytes < 0) {
+        // 如果发送失败 (例如，连接已关闭), 返回 false
+        return false;
+    }
+    return sent_bytes == size;
+}
 
-def disconnect_from_server():
-    """关闭并清理 socket 连接"""
-    if st.session_state.client_socket:
-        st.session_state.client_socket.close()
-        st.session_state.client_socket = None
-        st.session_state.subscribed = False
-        st.info("已从服务器断开。")
+bool receive_data(int sock, void* data, size_t size) {
+    ssize_t received_bytes = recv(sock, data, size, 0);
+    if (received_bytes <= 0) {
+        // 如果接收失败或客户端关闭了连接, 返回 false
+        return false;
+    }
+    return received_bytes == size;
+}
 
-def send_command(command_id, payload=b''):
-    """向服务器发送一个命令"""
-    if st.session_state.client_socket is None:
-        connect_to_server()
+
+// 图片发送线程函数
+void image_sender_thread(int client_socket) {
+    std::cout << "Image sender thread started." << std::endl;
+
+    // 准备要发送的图片数据 (只准备一次)
+    int32_t image_id = 123;
+    std::string name = "streaming_image.jpg";
+    int32_t num_bboxes = 1;
+    std::vector<int32_t> bboxes = {10, 20, 100, 150};
+    cv::Mat image = cv::imread("sample_image.jpg", cv::IMREAD_COLOR);
+    if (image.empty()) {
+        std::cerr << "Could not read the image for streaming." << std::endl;
+        is_subscribed = false; // 停止流
+        return;
+    }
+    std::vector<uchar> encoded_image;
+    cv::imencode(".jpg", image, encoded_image);
+    int64_t image_size = encoded_image.size();
     
-    if st.session_state.client_socket:
-        try:
-            header = struct.pack('!II', command_id, len(payload))
-            st.session_state.client_socket.sendall(header + payload)
-            return True
-        except (BrokenPipeError, ConnectionResetError):
-            st.error("与服务器的连接已断开。")
-            disconnect_from_server()
-            return False
-    return False
+    // 定义一个新的命令ID用于图像数据流，以便客户端区分
+    int32_t image_data_command_id = 5;
 
-# --- UI 和逻辑 ---
-
-st.title("持续图像订阅客户端")
-
-st.header("控制面板")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    if st.button("连接服务器", key="connect", disabled=st.session_state.client_socket is not None):
-        connect_to_server()
-        # 强制重新运行以更新UI状态
-        st.rerun()
-
-with col2:
-    if st.button("订阅图像流", key="subscribe", disabled=not st.session_state.client_socket or st.session_state.subscribed):
-        if send_command(3):
-            st.session_state.subscribed = True
-            st.rerun()
-
-with col3:
-    if st.button("取消订阅", key="unsubscribe", disabled=not st.session_state.subscribed):
-        if send_command(4):
-            st.session_state.subscribed = False
-            # 在这里我们不立即断开连接，以便可以重新订阅
-            st.rerun()
-
-# 图像显示区域
-st.header("图像直播")
-image_placeholder = st.empty()
-info_placeholder = st.empty()
-
-if not st.session_state.subscribed:
-    image_placeholder.info("当前未订阅。请连接并订阅以查看图像。")
-
-# 当处于订阅状态时，进入接收循环
-while st.session_state.subscribed:
-    try:
-        sock = st.session_state.client_socket
-        if sock is None:
-            st.session_state.subscribed = False
-            break
-
-        # 接收自定义的图像数据头 (ID=5)
-        header_data = sock.recv(8)
-        if not header_data:
-            raise ConnectionResetError
+    while (is_subscribed) {
+        // --- 序列化并发送数据 ---
+        // 1. 发送命令ID (5) 和总负载长度
+        int32_t payload_length = sizeof(image_id) + sizeof(int32_t) + name.length() + sizeof(num_bboxes) + bboxes.size() * sizeof(int32_t) + sizeof(image_size) + image_size;
+        if (!send_data(client_socket, &image_data_command_id, sizeof(image_data_command_id))) break;
+        if (!send_data(client_socket, &payload_length, sizeof(payload_length))) break;
         
-        command_id, payload_len = struct.unpack('!II', header_data)
+        // 2. 发送具体数据
+        if (!send_data(client_socket, &image_id, sizeof(image_id))) break;
+        int32_t name_len = name.length();
+        if (!send_data(client_socket, &name_len, sizeof(name_len))) break;
+        if (!send_data(client_socket, name.c_str(), name_len)) break;
+        if (!send_data(client_socket, &num_bboxes, sizeof(num_bboxes))) break;
+        if (!send_data(client_socket, bboxes.data(), bboxes.size() * sizeof(int32_t))) break;
+        if (!send_data(client_socket, &image_size, sizeof(image_size))) break;
+        if (!send_data(client_socket, encoded_image.data(), image_size)) break;
+
+        std::cout << "Sent one image frame." << std::endl;
+
+        // 等待一段时间再发送下一帧，避免网络拥塞
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    std::cout << "Image sender thread stopped." << std::endl;
+}
+
+// (adduserinfo 和 deleteusrinfo 函数保持不变)
+void handle_adduserinfo(int client_socket) { /* ... */ }
+void handle_deleteusrinfo(int client_socket) { /* ... */ }
+
+// 主循环，用于接收客户端指令
+void command_listener_loop(int client_socket) {
+    std::thread sender;
+
+    while (true) {
+        int32_t command_id;
+        // 使用 MSG_PEEK 来检查数据，但不从缓冲区移除，以判断连接是否仍然有效
+        if (recv(client_socket, &command_id, sizeof(command_id), MSG_PEEK) <= 0) {
+            std::cout << "Client disconnected." << std::endl;
+            is_subscribed = false; // 确保图片发送线程会停止
+            break;
+        }
         
-        if command_id == 5: # 确认是图像数据流
-            # 接收整个负载
-            full_payload = b''
-            while len(full_payload) < payload_len:
-                chunk = sock.recv(payload_len - len(full_payload))
-                if not chunk: raise ConnectionResetError
-                full_payload += chunk
-            
-            # 从负载中解析数据
-            offset = 0
-            image_id, = struct.unpack('!i', full_payload[offset:offset+4])
-            offset += 4
-            name_len, = struct.unpack('!I', full_payload[offset:offset+4])
-            offset += 4
-            name = full_payload[offset:offset+name_len].decode('utf-8')
-            offset += name_len
-            num_bboxes, = struct.unpack('!I', full_payload[offset:offset+4])
-            offset += 4
-            bboxes = []
-            for _ in range(num_bboxes):
-                bbox = struct.unpack('!iiii', full_payload[offset:offset+16])
-                bboxes.append(bbox)
-                offset += 16
-            
-            image_size, = struct.unpack('!Q', full_payload[offset:offset+8])
-            offset += 8
-            
-            image_data = full_payload[offset:offset+image_size]
+        // 真正地接收数据
+        if (!receive_data(client_socket, &command_id, sizeof(command_id))) break;
 
-            # 显示图像和信息
-            image = Image.open(io.BytesIO(image_data))
-            image_placeholder.image(image, caption=f"实时图像: {name}", use_column_width=True)
-            info_placeholder.info(f"ID: {image_id}, BBoxes: {bboxes}")
+        // 第二个header字段（payload_length）由每个handler自行处理
+        int32_t payload_length;
 
-        else:
-            # 收到意外的命令
-            info_placeholder.warning(f"从服务器收到意外的命令ID: {command_id}")
-            # 跳过这个包
-            sock.recv(payload_len)
+        switch (command_id) {
+            case 1: // adduserinfo
+                receive_data(client_socket, &payload_length, sizeof(payload_length));
+                handle_adduserinfo(client_socket);
+                break;
+            case 2: // deleteusrinfo
+                receive_data(client_socket, &payload_length, sizeof(payload_length));
+                handle_deleteusrinfo(client_socket);
+                break;
+            case 3: // subscribeimage
+                receive_data(client_socket, &payload_length, sizeof(payload_length)); // 读取空的payload length
+                std::cout << "Received subscribeimage request." << std::endl;
+                if (!is_subscribed) {
+                    is_subscribed = true;
+                    // 如果之前的线程已结束，则创建一个新的
+                    if (sender.joinable()) {
+                        sender.join();
+                    }
+                    sender = std::thread(image_sender_thread, client_socket);
+                }
+                break;
+            case 4: // unsubscribeimage
+                receive_data(client_socket, &payload_length, sizeof(payload_length)); // 读取空的payload length
+                std::cout << "Received unsubscribeimage request." << std::endl;
+                is_subscribed = false;
+                if (sender.joinable()) {
+                    sender.join();
+                }
+                break;
+            default:
+                std::cerr << "Unknown command: " << command_id << std::endl;
+                // 跳过未知的负载
+                receive_data(client_socket, &payload_length, sizeof(payload_length));
+                std::vector<char> unknown_payload(payload_length);
+                receive_data(client_socket, unknown_payload.data(), payload_length);
+        }
+    }
 
-    except (ConnectionResetError, BrokenPipeError):
-        st.error("与服务器的连接已断开。")
-        disconnect_from_server()
-        st.rerun()
-    except Exception as e:
-        st.error(f"发生错误: {e}")
-        disconnect_from_server()
-        st.rerun()
+    // 清理
+    is_subscribed = false;
+    if (sender.joinable()) {
+        sender.join();
+    }
+}
 
-# 当循环结束时（因为取消订阅），清理占位符
-if not st.session_state.subscribed:
-    image_placeholder.info("订阅已停止。")
-    info_placeholder.empty()
 
+int main() {
+    int server_fd;
+    struct sockaddr_in address;
+    int opt = 1;
+    int addrlen = sizeof(address);
+
+    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+        perror("socket failed");
+        exit(EXIT_FAILURE);
+    }
+
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+    
+    address.sin_family = AF_INET;
+    address.sin_addr.s_addr = INADDR_ANY;
+    address.sin_port = htons(8080);
+
+    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
+        perror("bind failed");
+        exit(EXIT_FAILURE);
+    }
+
+    if (listen(server_fd, 3) < 0) {
+        perror("listen");
+        exit(EXIT_FAILURE);
+    }
+    
+    std::cout << "Server listening on port 8080" << std::endl;
+
+    while (true) {
+        int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
+        if (new_socket < 0) {
+            perror("accept");
+            continue; // 继续等待下一个连接
+        }
+        
+        std::cout << "New client connected. Starting command listener..." << std::endl;
+        // 为每个客户端创建一个新线程来处理指令
+        // （为简单起见，此示例一次只处理一个客户端，但可以轻松扩展为多客户端）
+        command_listener_loop(new_socket);
+        close(new_socket);
+        std::cout << "Client session ended." << std::endl;
+    }
+
+    close(server_fd);
+    return 0;
+}
