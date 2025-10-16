@@ -56,159 +56,58 @@ Solve the custom dataset gradient not match.
 ```cpp
 
 #include <iostream>
-#include <string>
+#include <fstream>
 #include <vector>
-#include <thread>
-#include <atomic>
-#include <chrono>
+#include <string>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <dirent.h>
+#include <algorithm>
+
 #include <opencv2/opencv.hpp>
 
-// 使用原子布尔变量来安全地跨线程共享订阅状态
-std::atomic<bool> is_subscribed(false);
-
-// (发送和接收数据的辅助函数保持不变)
-bool send_data(int sock, const void* data, size_t size) {
-    // MSG_NOSIGNAL 防止在客户端断开连接时程序因 SIGPIPE 信号而崩溃
-    ssize_t sent_bytes = send(sock, data, size, MSG_NOSIGNAL);
-    if (sent_bytes < 0) {
-        // 如果发送失败 (例如，连接已关闭), 返回 false
-        return false;
-    }
-    return sent_bytes == size;
-}
-
-bool receive_data(int sock, void* data, size_t size) {
-    ssize_t received_bytes = recv(sock, data, size, 0);
-    if (received_bytes <= 0) {
-        // 如果接收失败或客户端关闭了连接, 返回 false
-        return false;
-    }
-    return received_bytes == size;
-}
-
-
-// 图片发送线程函数
-void image_sender_thread(int client_socket) {
-    std::cout << "Image sender thread started." << std::endl;
-
-    // 准备要发送的图片数据 (只准备一次)
-    int32_t image_id = 123;
-    std::string name = "streaming_image.jpg";
-    int32_t num_bboxes = 1;
-    std::vector<int32_t> bboxes = {10, 20, 100, 150};
-    cv::Mat image = cv::imread("sample_image.jpg", cv::IMREAD_COLOR);
-    if (image.empty()) {
-        std::cerr << "Could not read the image for streaming." << std::endl;
-        is_subscribed = false; // 停止流
-        return;
-    }
-    std::vector<uchar> encoded_image;
-    cv::imencode(".jpg", image, encoded_image);
-    int64_t image_size = encoded_image.size();
-    
-    // 定义一个新的命令ID用于图像数据流，以便客户端区分
-    int32_t image_data_command_id = 5;
-
-    while (is_subscribed) {
-        // --- 序列化并发送数据 ---
-        // 1. 发送命令ID (5) 和总负载长度
-        int32_t payload_length = sizeof(image_id) + sizeof(int32_t) + name.length() + sizeof(num_bboxes) + bboxes.size() * sizeof(int32_t) + sizeof(image_size) + image_size;
-        if (!send_data(client_socket, &image_data_command_id, sizeof(image_data_command_id))) break;
-        if (!send_data(client_socket, &payload_length, sizeof(payload_length))) break;
-        
-        // 2. 发送具体数据
-        if (!send_data(client_socket, &image_id, sizeof(image_id))) break;
-        int32_t name_len = name.length();
-        if (!send_data(client_socket, &name_len, sizeof(name_len))) break;
-        if (!send_data(client_socket, name.c_str(), name_len)) break;
-        if (!send_data(client_socket, &num_bboxes, sizeof(num_bboxes))) break;
-        if (!send_data(client_socket, bboxes.data(), bboxes.size() * sizeof(int32_t))) break;
-        if (!send_data(client_socket, &image_size, sizeof(image_size))) break;
-        if (!send_data(client_socket, encoded_image.data(), image_size)) break;
-
-        std::cout << "Sent one image frame." << std::endl;
-
-        // 等待一段时间再发送下一帧，避免网络拥塞
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
-
-    std::cout << "Image sender thread stopped." << std::endl;
-}
-
-// (adduserinfo 和 deleteusrinfo 函数保持不变)
-void handle_adduserinfo(int client_socket) { /* ... */ }
-void handle_deleteusrinfo(int client_socket) { /* ... */ }
-
-// 主循环，用于接收客户端指令
-void command_listener_loop(int client_socket) {
-    std::thread sender;
-
-    while (true) {
-        int32_t command_id;
-        // 使用 MSG_PEEK 来检查数据，但不从缓冲区移除，以判断连接是否仍然有效
-        if (recv(client_socket, &command_id, sizeof(command_id), MSG_PEEK) <= 0) {
-            std::cout << "Client disconnected." << std::endl;
-            is_subscribed = false; // 确保图片发送线程会停止
-            break;
+// 函数：发送一个完整的消息（先发送大小，再发送数据）
+bool send_all(int socket, const void* buffer, size_t length) {
+    const char* ptr = (const char*)buffer;
+    while (length > 0) {
+        int bytes_sent = send(socket, ptr, length, 0);
+        if (bytes_sent < 1) {
+            return false;
         }
-        
-        // 真正地接收数据
-        if (!receive_data(client_socket, &command_id, sizeof(command_id))) break;
-
-        // 第二个header字段（payload_length）由每个handler自行处理
-        int32_t payload_length;
-
-        switch (command_id) {
-            case 1: // adduserinfo
-                receive_data(client_socket, &payload_length, sizeof(payload_length));
-                handle_adduserinfo(client_socket);
-                break;
-            case 2: // deleteusrinfo
-                receive_data(client_socket, &payload_length, sizeof(payload_length));
-                handle_deleteusrinfo(client_socket);
-                break;
-            case 3: // subscribeimage
-                receive_data(client_socket, &payload_length, sizeof(payload_length)); // 读取空的payload length
-                std::cout << "Received subscribeimage request." << std::endl;
-                if (!is_subscribed) {
-                    is_subscribed = true;
-                    // 如果之前的线程已结束，则创建一个新的
-                    if (sender.joinable()) {
-                        sender.join();
-                    }
-                    sender = std::thread(image_sender_thread, client_socket);
-                }
-                break;
-            case 4: // unsubscribeimage
-                receive_data(client_socket, &payload_length, sizeof(payload_length)); // 读取空的payload length
-                std::cout << "Received unsubscribeimage request." << std::endl;
-                is_subscribed = false;
-                if (sender.joinable()) {
-                    sender.join();
-                }
-                break;
-            default:
-                std::cerr << "Unknown command: " << command_id << std::endl;
-                // 跳过未知的负载
-                receive_data(client_socket, &payload_length, sizeof(payload_length));
-                std::vector<char> unknown_payload(payload_length);
-                receive_data(client_socket, unknown_payload.data(), payload_length);
-        }
+        ptr += bytes_sent;
+        length -= bytes_sent;
     }
-
-    // 清理
-    is_subscribed = false;
-    if (sender.joinable()) {
-        sender.join();
-    }
+    return true;
 }
-
 
 int main() {
-    int server_fd;
+    // --- 1. 获取图片列表 ---
+    std::string image_dir = "images/";
+    std::vector<std::string> image_paths;
+    DIR *dir;
+    struct dirent *ent;
+    if ((dir = opendir(image_dir.c_str())) != NULL) {
+        while ((ent = readdir(dir)) != NULL) {
+            std::string filename = ent->d_name;
+            if (filename.find(".jpg") != std::string::npos || filename.find(".png") != std::string::npos) {
+                image_paths.push_back(image_dir + filename);
+            }
+        }
+        closedir(dir);
+        std::sort(image_paths.begin(), image_paths.end()); // 确保图片按顺序播放
+    } else {
+        std::cerr << "Error: Could not open image directory." << std::endl;
+        return 1;
+    }
+
+    if (image_paths.empty()) {
+        std::cerr << "Error: No images found in the directory." << std::endl;
+        return 1;
+    }
+
+    // --- 2. 创建并配置 Socket ---
+    int server_fd, new_socket;
     struct sockaddr_in address;
     int opt = 1;
     int addrlen = sizeof(address);
@@ -218,8 +117,6 @@ int main() {
         exit(EXIT_FAILURE);
     }
 
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
-    
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(8080);
@@ -233,24 +130,58 @@ int main() {
         perror("listen");
         exit(EXIT_FAILURE);
     }
-    
-    std::cout << "Server listening on port 8080" << std::endl;
 
+    std::cout << "Server listening on port 8080..." << std::endl;
+
+    if ((new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
+        perror("accept");
+        exit(EXIT_FAILURE);
+    }
+    std::cout << "Client connected." << std::endl;
+
+    // --- 3. 循环发送图片 ---
+    int image_index = 0;
     while (true) {
-        int new_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen);
-        if (new_socket < 0) {
-            perror("accept");
-            continue; // 继续等待下一个连接
+        // 读取图片
+        std::string current_image_path = image_paths[image_index];
+        cv::Mat image = cv::imread(current_image_path);
+        if (image.empty()) {
+            std::cerr << "Warning: Could not read image: " << current_image_path << std::endl;
+            image_index = (image_index + 1) % image_paths.size();
+            continue;
         }
-        
-        std::cout << "New client connected. Starting command listener..." << std::endl;
-        // 为每个客户端创建一个新线程来处理指令
-        // （为简单起见，此示例一次只处理一个客户端，但可以轻松扩展为多客户端）
-        command_listener_loop(new_socket);
-        close(new_socket);
-        std::cout << "Client session ended." << std::endl;
+
+        // 将图片编码为 JPEG 格式
+        std::vector<uchar> encoded_image;
+        std::vector<int> params = {cv::IMWRITE_JPEG_QUALITY, 90}; // 设定JPEG压缩质量
+        cv::imencode(".jpg", image, encoded_image, params);
+
+        // 准备发送数据
+        long image_size = encoded_image.size();
+
+        // 首先发送图片数据的大小
+        if (!send_all(new_socket, &image_size, sizeof(image_size))) {
+            std::cerr << "Failed to send image size. Client disconnected." << std::endl;
+            break;
+        }
+
+        // 然后发送图片数据本身
+        if (!send_all(new_socket, encoded_image.data(), image_size)) {
+            std::cerr << "Failed to send image data. Client disconnected." << std::endl;
+            break;
+        }
+
+        std::cout << "Sent " << current_image_path << " (" << image_size << " bytes)" << std::endl;
+
+        // 切换到下一张图片
+        image_index = (image_index + 1) % image_paths.size();
+
+        // 控制发送速率，例如每秒10帧
+        usleep(100000); // 100ms
     }
 
+    close(new_socket);
     close(server_fd);
+
     return 0;
 }
