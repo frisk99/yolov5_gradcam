@@ -55,6 +55,18 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
+#include <iostream>
+#include <vector>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <cstring>
+#include <cerrno>
+#include <stdexcept>
+#include <optional>  // <<< 1. 包含 optional
+#include <chrono>    // for main
+#include <thread>    // for main
+#include <memory>
+
 class PipeUtils {
 public:
     // 确保写入所有数据
