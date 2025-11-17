@@ -55,140 +55,243 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
-import streamlit as st
-import socket
-import numpy as np
-import cv2
-import struct
-import time
+class PipeUtils {
+public:
+    // 确保写入所有数据
+    static bool send_data(int fd, const void* data, size_t size) {
+        const char* ptr = static_cast<const char*>(data);
+        size_t total = 0;
+        while (total < size) {
+            ssize_t written = write(fd, ptr + total, size - total);
+            if (written < 0) {
+                if (errno == EINTR) continue;
+                if (errno == EPIPE) {
+                    std::cerr << "Pipe write error: Broken pipe (EPIPE)" << std::endl;
+                } else {
+                    perror("Pipe write error");
+                }
+                return false;
+            }
+            total += written;
+        }
+        return true;
+    }
 
-# --- 页面配置 ---
-st.set_page_config(
-    page_title="实时图像流播放器",
-    page_icon="📹"
-)
+    // 确保读取所有数据
+    static ssize_t recv_data(int fd, void* data, size_t size) {
+        char* ptr = static_cast<char*>(data);
+        size_t total = 0;
+        while (total < size) {
+            ssize_t read_bytes = read(fd, ptr + total, size - total);
+            if (read_bytes < 0) {
+                if (errno == EINTR) continue;
+                perror("Pipe read error");
+                return -1; // -1 表示错误
+            }
+            if (read_bytes == 0) {
+                if (total == 0) {
+                    return 0; // 0 表示 EOF
+                }
+                std::cerr << "Pipe closed unexpectedly" << std::endl;
+                return -1;
+            }
+            total += read_bytes;
+        }
+        return total; // 返回读取的字节数
+    }
+};
 
-st.title("📹 C++ 服务器图像流播放")
 
-# --- Socket 连接参数 ---
-HOST = '127.0.0.1'  # C++ 服务器的 IP 地址
-PORT = 8080         # C++ 服务器的端口
+// --- 核心工作类 ---
+class ImageProcessor {
+public:
+    ImageProcessor() : child_pid_(-1), fd_write_to_child_(-1), fd_read_from_child_(-1) {
+        // 构造函数现在只调用 start_worker
+        if (!start_worker()) {
+            throw std::runtime_error("Failed to start initial worker process");
+        }
+    }
 
-# 使用 Streamlit 的 Session State 来存储 socket 对象，避免每次刷新都重连
-if 'sock' not in st.session_state:
-    st.session_state.sock = None
+    ~ImageProcessor() {
+        // 析构函数现在只调用 stop_worker
+        stop_worker();
+    }
 
-def connect_to_server():
-    """建立到服务器的连接"""
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.connect((HOST, PORT))
-        st.session_state.sock = sock
-        return True
-    except ConnectionRefusedError:
-        st.error(f"连接被拒绝。请确保 C++ 服务器正在运行于 {HOST}:{PORT}。")
-        st.session_state.sock = None
-        return False
-    except Exception as e:
-        st.error(f"连接失败: {e}")
-        st.session_state.sock = None
-        return False
-
-def recv_all(sock, count):
-    """确保接收到指定字节数的数据"""
-    buf = b''
-    while len(buf) < count:
-        new_buf = sock.recv(count - len(buf))
-        if not new_buf:
-            return None
-        buf += new_buf
-    return buf
-
-def main():
-    # --- 侧边栏控制 ---
-    st.sidebar.header("控制面板")
-    
-    if st.sidebar.button('连接服务器', key='connect'):
-        if st.session_state.sock is None:
-            if connect_to_server():
-                st.sidebar.success("已成功连接到服务器！")
-            else:
-                st.sidebar.error("连接失败。")
-        else:
-            st.sidebar.warning("已经连接。如需重连，请先断开。")
-
-    if st.sidebar.button('开始播放', key='play', disabled=(st.session_state.sock is None)):
-        st.session_state.is_playing = True
-
-    if st.sidebar.button('停止播放', key='stop'):
-        st.session_state.is_playing = False
+    std::optional<std::vector<float>> process(const std::vector<unsigned char>& image) {
         
-    if st.sidebar.button('断开连接', key='disconnect'):
-        if st.session_state.sock:
-            st.session_state.sock.close()
-            st.session_state.sock = None
-            st.session_state.is_playing = False
-            st.sidebar.info("已断开连接。")
+        // 尝试 2 次：1 次正常，1 次在重启后
+        const int MAX_ATTEMPTS = 2; 
+        for (int attempt = 1; attempt <= MAX_ATTEMPTS; ++attempt) {
+            
+            // 1. 发送数据给子进程
+            if (!send_image(fd_write_to_child_, image)) {
+                std::cerr << "[Parent] Send failed on attempt " << attempt << std::endl;
+                if (attempt == MAX_ATTEMPTS) return std::nullopt; // 最终失败
+                if (!restart_worker()) return std::nullopt; // 重启失败
+                continue; // 重试
+            }
 
-    # 初始化播放状态
-    if 'is_playing' not in st.session_state:
-        st.session_state.is_playing = False
+            // 2. 读取子进程结果
+            std::optional<std::vector<float>> results = recv_results(fd_read_from_child_);
+            if (!results.has_value()) {
+                std::cerr << "[Parent] Recv failed on attempt " << attempt << std::endl;
+                if (attempt == MAX_ATTEMPTS) return std::nullopt; // 最终失败
+                if (!restart_worker()) return std::nullopt; // 重启失败
+                continue; // 重试 (注意：重试会重新发送数据)
+            }
 
-    # --- 主显示区域 ---
-    image_placeholder = st.empty()
-    image_placeholder.info("请先连接服务器，然后点击 '开始播放'。")
+            return results; // 成功！
+        }
+        
+        return std::nullopt; // 理论上不会到这里
+    }
 
-    if st.session_state.get('is_playing') and st.session_state.sock:
-        try:
-            while st.session_state.is_playing:
-                # 1. 接收图像大小 (long 类型，8 字节)
-                size_data = recv_all(st.session_state.sock, 8)
-                if size_data is None:
-                    st.warning("与服务器的连接已断开。")
-                    st.session_state.is_playing = False
-                    st.session_state.sock = None
-                    break
-                
-                # 解包得到图像大小
-                image_size = struct.unpack('<q', size_data)[0]
+private:
+    pid_t child_pid_;
+    int fd_write_to_child_;
+    int fd_read_from_child_;
 
-                # 2. 接收图像数据
-                image_data = recv_all(st.session_state.sock, image_size)
-                if image_data is None:
-                    st.warning("与服务器的连接已断开。")
-                    st.session_state.is_playing = False
-                    st.session_state.sock = None
-                    break
+    // --- 提取出的工作者启动逻辑 ---
+    bool start_worker() {
+        int pipe_p2c[2]; // Parent -> Child
+        int pipe_c2p[2]; // Child -> Parent
 
-                # 3. 解码并显示图像
-                # 将字节数据转换为 numpy 数组
-                nparr = np.frombuffer(image_data, np.uint8)
-                # 从数组解码图像
-                img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        if (pipe(pipe_p2c) == -1 || pipe(pipe_c2p) == -1) {
+            perror("pipe failed");
+            return false;
+        }
 
-                if img_np is not None:
-                    # OpenCV 读取的格式是 BGR，需要转换为 RGB 以在网页上正确显示
-                    img_rgb = cv2.cvtColor(img_np, cv2.COLOR_BGR2RGB)
-                    image_placeholder.image(img_rgb, caption="实时视频流", use_column_width=True)
-                else:
-                    st.error("解码图像失败！")
-                
-                # 控制刷新率，给 Streamlit 一点时间来渲染
-                time.sleep(0.01)
+        child_pid_ = fork();
 
-        except (ConnectionResetError, BrokenPipeError):
-            st.error("与服务器的连接被重置。请重新连接。")
-            st.session_state.sock.close()
-            st.session_state.sock = None
-            st.session_state.is_playing = False
-        except Exception as e:
-            st.error(f"发生未知错误: {e}")
-            if st.session_state.sock:
-                st.session_state.sock.close()
-            st.session_state.sock = None
-            st.session_state.is_playing = False
+        if (child_pid_ == -1) {
+            perror("fork failed");
+            return false;
+        }
 
+        if (child_pid_ == 0) {
+            // === 子进程逻辑 ===
+            close(pipe_p2c[1]); // P->C 关写
+            close(pipe_c2p[0]); // C->P 关读
+            run_child_loop(pipe_p2c[0], pipe_c2p[1]);
+            close(pipe_p2c[0]);
+            close(pipe_c2p[1]);
+            exit(0); 
+        } else {
+            // === 父进程逻辑 ===
+            close(pipe_p2c[0]); // P->C 关读
+            close(pipe_c2p[1]); // C->P 关写
+            fd_write_to_child_ = pipe_p2c[1];
+            fd_read_from_child_ = pipe_c2p[0];
+            std::cout << "[Parent] Worker process started with PID: " << child_pid_ << std::endl;
+            return true;
+        }
+    }
 
-if __name__ == '__main__':
-    main()
+    // --- 提取出的工作者停止逻辑 ---
+    void stop_worker() {
+        if (child_pid_ <= 0) return; // 已经停止
 
+        std::cout << "[Parent] Shutting down worker PID: " << child_pid_ << std::endl;
+        
+        // 1. 关闭管道，通知子进程退出
+        close(fd_write_to_child_);
+        close(fd_read_from_child_);
+
+        // 2. 等待子进程退出
+        waitpid(child_pid_, nullptr, 0);
+        
+        // 3. 重置状态
+        child_pid_ = -1;
+        fd_write_to_child_ = -1;
+        fd_read_from_child_ = -1;
+    }
+
+    // --- 新的重启函数 ---
+    bool restart_worker() {
+        std::cerr << "[Parent] --- RESTARTING WORKER ---" << std::endl;
+        stop_worker(); // 清理旧的
+        return start_worker(); // 启动新的
+    }
+
+    // 父进程辅助：发送图片 (不变)
+    bool send_image(int fd, const std::vector<unsigned char>& img) {
+        uint64_t size = img.size();
+        if (!PipeUtils::send_data(fd, &size, sizeof(size))) return false;
+        if (size > 0) {
+            if (!PipeUtils::send_data(fd, img.data(), size)) return false;
+        }
+        return true;
+    }
+
+    // 父进程辅助：接收结果 (修改为返回 optional)
+    std::optional<std::vector<float>> recv_results(int fd) {
+        uint32_t count = 0;
+        // <= 0 同时捕获 错误(-1) 和 EOF(0)
+        if (PipeUtils::recv_data(fd, &count, sizeof(count)) <= 0) {
+            std::cerr << "[Parent] Failed to read result count." << std::endl;
+            return std::nullopt;
+        }
+        
+        std::vector<float> results(count);
+        if (count > 0) {
+            if (PipeUtils::recv_data(fd, results.data(), count * sizeof(float)) <= 0) {
+                std::cerr << "[Parent] Failed to read result data." << std::endl;
+                return std::nullopt;
+            }
+        }
+        return results; // 成功
+    }
+
+    // 子进程工作循环 (不变)
+    void run_child_loop(int fd_read, int fd_write) {
+        while (true) {
+            uint64_t img_size = 0;
+            ssize_t read_ret = PipeUtils::recv_data(fd_read, &img_size, sizeof(img_size));
+
+            if (read_ret == 0) {
+                std::cout << "[Child] Parent closed pipe. Exiting loop." << std::endl;
+                break; 
+            }
+            if (read_ret < 0) {
+                std::cerr << "[Child] Pipe read error. Exiting." << std::endl;
+                break;
+            }
+
+            // (此处省略读取图像、处理、发送结果的代码，与上一版相同)
+            // 2. 读取图像数据
+            std::vector<unsigned char> img(img_size);
+            if (img_size > 0) {
+                if (PipeUtils::recv_data(fd_read, img.data(), img_size) < 0) {
+                    std::cerr << "[Child] Pipe read (data) error. Exiting." << std::endl;
+                    break;
+                }
+            }
+            
+            // 3. >>> 真正的数据处理算法在这里 <<<
+            std::vector<float> result = internal_algorithm(img);
+
+            // 4. 发送结果
+            uint32_t res_count = result.size();
+            if (!PipeUtils::send_data(fd_write, &res_count, sizeof(res_count))) {
+                 std::cerr << "[Child] Pipe write error. Exiting." << std::endl;
+                 break;
+            }
+            if (res_count > 0) {
+                if (!PipeUtils::send_data(fd_write, result.data(), res_count * sizeof(float))) {
+                    std::cerr << "[Child] Pipe write (data) error. Exiting." << std::endl;
+                    break;
+                }
+            }
+        } 
+    }
+
+    // 模拟图像处理算法 (不变)
+    std::vector<float> internal_algorithm(const std::vector<unsigned char>& img) {
+        // ... (模拟代码) ...
+        std::vector<float> res;
+        res.push_back(10.5f);
+        res.push_back(20.5f);
+        res.push_back(static_cast<float>(img.size()));
+        return res;
+    }
+};
