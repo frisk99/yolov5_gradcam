@@ -54,98 +54,103 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-#include "include/llama.h"  // 确保路径正确
 #include <vector>
-#include <string>
+#include <opencv2/opencv.hpp>
 #include <iostream>
-#include <cstring>
 
-// 辅助函数：将 token id 转回字符串 (Detokenize)
-// 注意：参数类型已修改为 const llama_vocab*
-std::string token_to_piece(const llama_vocab* vocab, llama_token token) {
-    std::vector<char> result(8, 0);
-    // 新版 API：传入 vocab
-    int n_tokens = llama_token_to_piece(vocab, token, result.data(), result.size(), 0, true);
-    
-    if (n_tokens < 0) {
-        result.resize(-n_tokens);
-        // 新版 API：传入 vocab
-        int check = llama_token_to_piece(vocab, token, result.data(), result.size(), 0, true);
-        if (check == -n_tokens) return std::string(result.data(), result.size());
-    } else {
-        return std::string(result.data(), n_tokens);
+std::vector<float> qwen2_vl_process_image(
+    const cv::Mat& img, 
+    int temporal_patch_size,
+    int patch_size,
+    int merge_size
+) {
+    if (img.empty() || img.channels() != 3) {
+        return {};
     }
-    return "";
+
+    int height = img.rows;
+    int width = img.cols;
+    int channel = 3;
+
+    int grid_h = height / patch_size;
+    int grid_w = width / patch_size;
+    int grid_t = 1;
+
+    int grid_h_sub = grid_h / merge_size;
+    int grid_w_sub = grid_w / merge_size;
+
+    // 内存分配：7 个数字相乘
+    size_t total_elements = (size_t)grid_t * grid_h * grid_w * channel * temporal_patch_size * patch_size * patch_size;
+    //两次merge size 可以忽略
+    std::vector<float> result(total_elements, 0.0f);
+    float* out_ptr = result.data();
+
+    // 循环：8 层 (i3, i6, i4, i7, i2, i1, i5, i8) + 1 层隐式 (i0)
+    for (int i3 = 0; i3 < grid_h_sub; ++i3) {
+        for (int i6 = 0; i6 < grid_w_sub; ++i6) {
+            for (int i4 = 0; i4 < merge_size; ++i4) {
+                for (int i7 = 0; i7 < merge_size; ++i7) {
+                    for (int i2 = 0; i2 < channel; ++i2) {
+                        int channel_idx = i2; 
+                        for (int i1 = 0; i1 < temporal_patch_size; ++i1) {
+                            for (int i5 = 0; i5 < patch_size; ++i5) {
+                                for (int i8 = 0; i8 < patch_size; ++i8) {
+                                    
+                                    int h_idx = i3 * (merge_size * patch_size) + i4 * patch_size + i5;
+                                    int w_idx = i6 * (merge_size * patch_size) + i7 * patch_size + i8;
+
+                                    if (h_idx < height && w_idx < width) {
+                                        cv::Vec3b pixel = img.at<cv::Vec3b>(h_idx, w_idx);
+                                        *out_ptr++ = static_cast<float>(pixel[channel_idx]);
+                                    } else {
+                                        *out_ptr++ = 0.0f;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    //repeat 
+    result.reserve(result.size() * 2);
+    result.insert(result.end(), result.begin(), result.end());
+    return result;
 }
+std::string extractContent(const std::string& source) {
+    const std::string startDelim = "BEGIN]";
+    const std::string endDelim = "[END]";
+    size_t startPos = source.find(startDelim);
+    if (startPos == std::string::npos) return "";
+    startPos += startDelim.length();
+    size_t endPos = source.find(endDelim, startPos);
+    if (endPos == std::string::npos) return "";
+    return source.substr(startPos, endPos - startPos);
+}
+template <typename T>
+bool saveVectorToRaw(const std::vector<T>& vec, const std::string& filename) {
+    static_assert(std::is_trivially_copyable<T>::value, "Error: Type must be POD (Plain Old Data)");
 
-int main() {
-    // 1. 初始化
-    llama_backend_init();
-    // 关掉烦人的加载日志，让输出干净点
-    llama_log_set(NULL, NULL);
-
-    // 2. 加载模型 (Vocab Only 模式)
-    auto mparams = llama_model_default_params();
-    mparams.vocab_only = true; // 关键：只加载词表，不吃显存
-
-    // 指向你的纯词表 GGUF 文件
-    struct llama_model * model = llama_load_model_from_file("qwen_vocab.gguf", mparams);
-
-    if (!model) {
-        std::cerr << "加载失败: 找不到 qwen_vocab.gguf 文件" << std::endl;
-        return 1;
+    if (vec.empty()) {
+        std::cerr << "Warning: Vector is empty, creating empty file." << std::endl;
     }
 
-    // ==========================================
-    // 【关键修改】获取 Vocab 指针
-    // ==========================================
-    const llama_vocab * vocab = llama_model_get_vocab(model);
+    std::ofstream outFile(filename, std::ios::binary | std::ios::trunc);
 
-    // 3. 执行分词
-    std::string text = "帮我点击<box>(100,200)</box>";
-    
-    // 预分配缓冲区
-    std::vector<llama_token> tokens(text.length() + 16);
-
-    // 【关键修改】这里传入 vocab 而不是 model
-    int n_tokens = llama_tokenize(
-        vocab,           // <--- 修改了这里
-        text.c_str(), 
-        text.length(), 
-        tokens.data(), 
-        tokens.size(), 
-        true, // add_bos
-        true  // parse_special (识别 <box> 等)
-    );
-
-    if (n_tokens < 0) {
-        // 如果返回负数，说明 buffer 不够大，这里为了演示直接报错
-        // 实际工程中可以根据 -n_tokens 重新 resize 并再次调用
-        n_tokens = -n_tokens; 
-        std::cerr << "Buffer too small" << std::endl;
+    if (!outFile.is_open()) {
+        std::cerr << "Error: Failed to open file " << filename << " for writing." << std::endl;
+        return false;
     }
-    tokens.resize(n_tokens);
+    size_t totalBytes = vec.size() * sizeof(T);
+    outFile.write(reinterpret_cast<const char*>(vec.data()), totalBytes);
 
-    // 4. 打印 Token IDs
-    std::cout << "Original Text: " << text << std::endl;
-    std::cout << "Token IDs: [ ";
-    for (auto id : tokens) {
-        std::cout << id << " ";
+    outFile.close();
+    if (!outFile) {
+        std::cerr << "Error: Write operation failed!" << std::endl;
+        return false;
     }
-    std::cout << "]" << std::endl;
 
-    // 5. 验证还原 (Detokenize)
-    std::cout << "Decode Check: ";
-    for (auto id : tokens) {
-        // 【关键修改】辅助函数里也传入 vocab
-        std::string piece = token_to_piece(vocab, id);
-        std::cout << piece;
-    }
-    std::cout << std::endl;
-
-    // 6. 清理
-    llama_free_model(model);
-    llama_backend_free();
-
-    return 0;
+    std::cout << "Saved " << totalBytes << " bytes to " << filename << std::endl;
+    return true;
 }
