@@ -55,102 +55,57 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 #include <vector>
-#include <opencv2/opencv.hpp>
+#include <string>
+#include <fstream>
 #include <iostream>
+#include <stdexcept> // 用于抛出异常
 
-std::vector<float> qwen2_vl_process_image(
-    const cv::Mat& img, 
-    int temporal_patch_size,
-    int patch_size,
-    int merge_size
-) {
-    if (img.empty() || img.channels() != 3) {
-        return {};
+/**
+ * @brief 加载 Numpy .tofile() 生成的 Raw 二进制文件
+ * * @param file_path  raw 文件的路径
+ * @param n_vocab    词表大小 (Qwen通常是 152064)
+ * @param n_dim      向量维度 (Qwen通常是 3584)
+ * @return std::vector<float> 包含所有 Embedding 的一维数组
+ */
+std::vector<float> load_embeddings(const std::string& file_path, size_t n_vocab, size_t n_dim) {
+    // 1. 计算预期的总浮点数个数和总字节数
+    size_t total_floats = n_vocab * n_dim;
+    size_t expected_bytes = total_floats * sizeof(float); // float = 4 bytes
+
+    // 2. 打开文件 (二进制模式 + 定位到末尾以获取大小)
+    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+
+    // 检查文件是否存在
+    if (!file.is_open()) {
+        throw std::runtime_error("❌ 无法打开文件: " + file_path);
     }
 
-    int height = img.rows;
-    int width = img.cols;
-    int channel = 3;
-
-    int grid_h = height / patch_size;
-    int grid_w = width / patch_size;
-    int grid_t = 1;
-
-    int grid_h_sub = grid_h / merge_size;
-    int grid_w_sub = grid_w / merge_size;
-
-    // 内存分配：7 个数字相乘
-    size_t total_elements = (size_t)grid_t * grid_h * grid_w * channel * temporal_patch_size * patch_size * patch_size;
-    //两次merge size 可以忽略
-    std::vector<float> result(total_elements, 0.0f);
-    float* out_ptr = result.data();
-
-    // 循环：8 层 (i3, i6, i4, i7, i2, i1, i5, i8) + 1 层隐式 (i0)
-    for (int i3 = 0; i3 < grid_h_sub; ++i3) {
-        for (int i6 = 0; i6 < grid_w_sub; ++i6) {
-            for (int i4 = 0; i4 < merge_size; ++i4) {
-                for (int i7 = 0; i7 < merge_size; ++i7) {
-                    for (int i2 = 0; i2 < channel; ++i2) {
-                        int channel_idx = i2; 
-                        for (int i1 = 0; i1 < temporal_patch_size; ++i1) {
-                            for (int i5 = 0; i5 < patch_size; ++i5) {
-                                for (int i8 = 0; i8 < patch_size; ++i8) {
-                                    
-                                    int h_idx = i3 * (merge_size * patch_size) + i4 * patch_size + i5;
-                                    int w_idx = i6 * (merge_size * patch_size) + i7 * patch_size + i8;
-
-                                    if (h_idx < height && w_idx < width) {
-                                        cv::Vec3b pixel = img.at<cv::Vec3b>(h_idx, w_idx);
-                                        *out_ptr++ = static_cast<float>(pixel[channel_idx]);
-                                    } else {
-                                        *out_ptr++ = 0.0f;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    //repeat 
-    result.reserve(result.size() * 2);
-    result.insert(result.end(), result.begin(), result.end());
-    return result;
-}
-std::string extractContent(const std::string& source) {
-    const std::string startDelim = "BEGIN]";
-    const std::string endDelim = "[END]";
-    size_t startPos = source.find(startDelim);
-    if (startPos == std::string::npos) return "";
-    startPos += startDelim.length();
-    size_t endPos = source.find(endDelim, startPos);
-    if (endPos == std::string::npos) return "";
-    return source.substr(startPos, endPos - startPos);
-}
-template <typename T>
-bool saveVectorToRaw(const std::vector<T>& vec, const std::string& filename) {
-    static_assert(std::is_trivially_copyable<T>::value, "Error: Type must be POD (Plain Old Data)");
-
-    if (vec.empty()) {
-        std::cerr << "Warning: Vector is empty, creating empty file." << std::endl;
+    // 3. 校验文件大小 (安全检查)
+    std::streamsize file_size = file.tellg();
+    if (file_size != static_cast<std::streamsize>(expected_bytes)) {
+        // 构造详细的错误信息
+        std::string err_msg = "❌ 文件大小不匹配!\n";
+        err_msg += "  预期: " + std::to_string(expected_bytes) + " 字节 (FP32)\n";
+        err_msg += "  实际: " + std::to_string(file_size) + " 字节\n";
+        err_msg += "  提示: 请检查 Python 端是否做了 .float() 转换，或维度是否正确。";
+        throw std::runtime_error(err_msg);
     }
 
-    std::ofstream outFile(filename, std::ios::binary | std::ios::trunc);
+    // 4. 回到文件开头准备读取
+    file.seekg(0, std::ios::beg);
 
-    if (!outFile.is_open()) {
-        std::cerr << "Error: Failed to open file " << filename << " for writing." << std::endl;
-        return false;
-    }
-    size_t totalBytes = vec.size() * sizeof(T);
-    outFile.write(reinterpret_cast<const char*>(vec.data()), totalBytes);
+    // 5. 分配内存 (一次性申请约 2GB，避免 resize 开销)
+    std::vector<float> embeddings(total_floats);
 
-    outFile.close();
-    if (!outFile) {
-        std::cerr << "Error: Write operation failed!" << std::endl;
-        return false;
+    // 6. 执行读取 (DMA 拷贝)
+    // 将 vector 内部指针强转为 char*，直接填充二进制数据
+    if (!file.read(reinterpret_cast<char*>(embeddings.data()), expected_bytes)) {
+        throw std::runtime_error("❌ 读取文件流中断");
     }
 
-    std::cout << "Saved " << totalBytes << " bytes to " << filename << std::endl;
-    return true;
+    std::cout << "✅ 成功加载 Embedding: " << file_path << std::endl;
+    std::cout << "   内存占用: " << expected_bytes / 1024 / 1024 << " MB" << std::endl;
+    std::cout << "   矩阵形状: [" << n_vocab << " x " << n_dim << "]" << std::endl;
+
+    return embeddings;
 }
