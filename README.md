@@ -54,58 +54,54 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-#include <vector>
-#include <string>
-#include <fstream>
-#include <iostream>
-#include <stdexcept> // 用于抛出异常
 
-/**
- * @brief 加载 Numpy .tofile() 生成的 Raw 二进制文件
- * * @param file_path  raw 文件的路径
- * @param n_vocab    词表大小 (Qwen通常是 152064)
- * @param n_dim      向量维度 (Qwen通常是 3584)
- * @return std::vector<float> 包含所有 Embedding 的一维数组
- */
-std::vector<float> load_embeddings(const std::string& file_path, size_t n_vocab, size_t n_dim) {
-    // 1. 计算预期的总浮点数个数和总字节数
-    size_t total_floats = n_vocab * n_dim;
-    size_t expected_bytes = total_floats * sizeof(float); // float = 4 bytes
+import torch
+from PIL import Image
+from transformers import Qwen2VLImageProcessor, AutoTokenizer
+from qwen_vl_utils import process_vision_info
 
-    // 2. 打开文件 (二进制模式 + 定位到末尾以获取大小)
-    std::ifstream file(file_path, std::ios::binary | std::ios::ate);
+model_path = "/home/stone/data/model/Qwen3-VL-2B-Instruct"
 
-    // 检查文件是否存在
-    if (!file.is_open()) {
-        throw std::runtime_error("❌ 无法打开文件: " + file_path);
+image_processor = Qwen2VLImageProcessor.from_pretrained(model_path)
+tokenizer = AutoTokenizer.from_pretrained(model_path)
+
+def data_preprocess(img_path, inp_h=416, inp_w=416, prompt=''):
+    messages = [{ 
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "image": img_path,
+                "resized_height": inp_h,
+                "resized_width": inp_w,
+            },
+            {"type": "text", "text": prompt},
+        ],
+    }]
+    
+
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    text_inputs = tokenizer([text], return_tensors="pt")
+    image_inputs, video_inputs = process_vision_info(messages)
+    image_outputs = image_processor(
+        images=image_inputs,
+        return_tensors="pt"
+    )
+    inputs = {
+        "input_ids": text_inputs["input_ids"],
+        "attention_mask": text_inputs["attention_mask"],
+        "pixel_values": image_outputs["pixel_values"],
+        "image_grid_thw": image_outputs["image_grid_thw"],
     }
+    
+    return inputs
 
-    // 3. 校验文件大小 (安全检查)
-    std::streamsize file_size = file.tellg();
-    if (file_size != static_cast<std::streamsize>(expected_bytes)) {
-        // 构造详细的错误信息
-        std::string err_msg = "❌ 文件大小不匹配!\n";
-        err_msg += "  预期: " + std::to_string(expected_bytes) + " 字节 (FP32)\n";
-        err_msg += "  实际: " + std::to_string(file_size) + " 字节\n";
-        err_msg += "  提示: 请检查 Python 端是否做了 .float() 转换，或维度是否正确。";
-        throw std::runtime_error(err_msg);
-    }
 
-    // 4. 回到文件开头准备读取
-    file.seekg(0, std::ios::beg);
-
-    // 5. 分配内存 (一次性申请约 2GB，避免 resize 开销)
-    std::vector<float> embeddings(total_floats);
-
-    // 6. 执行读取 (DMA 拷贝)
-    // 将 vector 内部指针强转为 char*，直接填充二进制数据
-    if (!file.read(reinterpret_cast<char*>(embeddings.data()), expected_bytes)) {
-        throw std::runtime_error("❌ 读取文件流中断");
-    }
-
-    std::cout << "✅ 成功加载 Embedding: " << file_path << std::endl;
-    std::cout << "   内存占用: " << expected_bytes / 1024 / 1024 << " MB" << std::endl;
-    std::cout << "   矩阵形状: [" << n_vocab << " x " << n_dim << "]" << std::endl;
-
-    return embeddings;
-}
+try:
+    output = data_preprocess("/home/stone/下载/bus.jpg", 416, 416, "hello")
+    print(f"input_ids shape: {output['input_ids'].shape}")
+    print(f"pixel_values shape: {output['pixel_values'].shape}")
+    print(f"image_grid_thw: {output['image_grid_thw'].tolist()}")
+    
+except Exception as e:
+    print(e)
