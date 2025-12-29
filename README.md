@@ -55,16 +55,11 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
-mkdir build-android-vulkan && cd build-android-vulkan
-
-cmake .. -G Ninja \
-    -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/build/cmake/android.toolchain.cmake \
+cmake .. \
+    -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
     -DANDROID_ABI=arm64-v8a \
     -DANDROID_PLATFORM=android-28 \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DGGML_VULKAN=ON \
-    -DVulkan_INCLUDE_DIR=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
-    -DVulkan_LIBRARY=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/28/libvulkan.so
-
-# 开始编译
-ninja
+    -DCMAKE_C_FLAGS="-march=armv8.2-a+dotprod" \
+    -DCMAKE_CXX_FLAGS="-march=armv8.2-a+dotprod" \
+    -DGGML_OPENMP=OFF \
+    -DGGML_LLAMAFILE=OFF
