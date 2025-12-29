@@ -63,3 +63,7 @@ cmake .. \
     -DCMAKE_CXX_FLAGS="-march=armv8.2-a+dotprod" \
     -DGGML_OPENMP=OFF \
     -DGGML_LLAMAFILE=OFF
+
+
+-DVulkan_INCLUDE_DIR=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
+-DVulkan_LIBRARY=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/28/libvulkan.so
