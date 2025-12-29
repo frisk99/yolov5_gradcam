@@ -55,53 +55,16 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
-import torch
-from PIL import Image
-from transformers import Qwen2VLImageProcessor, AutoTokenizer
-from qwen_vl_utils import process_vision_info
+mkdir build-android-vulkan && cd build-android-vulkan
 
-model_path = "/home/stone/data/model/Qwen3-VL-2B-Instruct"
+cmake .. -G Ninja \
+    -DCMAKE_TOOLCHAIN_FILE=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/build/cmake/android.toolchain.cmake \
+    -DANDROID_ABI=arm64-v8a \
+    -DANDROID_PLATFORM=android-28 \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DGGML_VULKAN=ON \
+    -DVulkan_INCLUDE_DIR=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
+    -DVulkan_LIBRARY=$NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/28/libvulkan.so
 
-image_processor = Qwen2VLImageProcessor.from_pretrained(model_path)
-tokenizer = AutoTokenizer.from_pretrained(model_path)
-
-def data_preprocess(img_path, inp_h=416, inp_w=416, prompt=''):
-    messages = [{ 
-        "role": "user",
-        "content": [
-            {
-                "type": "image",
-                "image": img_path,
-                "resized_height": inp_h,
-                "resized_width": inp_w,
-            },
-            {"type": "text", "text": prompt},
-        ],
-    }]
-    
-
-    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    text_inputs = tokenizer([text], return_tensors="pt")
-    image_inputs, video_inputs = process_vision_info(messages)
-    image_outputs = image_processor(
-        images=image_inputs,
-        return_tensors="pt"
-    )
-    inputs = {
-        "input_ids": text_inputs["input_ids"],
-        "attention_mask": text_inputs["attention_mask"],
-        "pixel_values": image_outputs["pixel_values"],
-        "image_grid_thw": image_outputs["image_grid_thw"],
-    }
-    
-    return inputs
-
-
-try:
-    output = data_preprocess("/home/stone/下载/bus.jpg", 416, 416, "hello")
-    print(f"input_ids shape: {output['input_ids'].shape}")
-    print(f"pixel_values shape: {output['pixel_values'].shape}")
-    print(f"image_grid_thw: {output['image_grid_thw'].tolist()}")
-    
-except Exception as e:
-    print(e)
+# 开始编译
+ninja
