@@ -59,11 +59,8 @@ cmake .. \
     -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
     -DANDROID_ABI=arm64-v8a \
     -DANDROID_PLATFORM=android-28 \
-    -DCMAKE_C_FLAGS="-march=armv8.2-a+dotprod" \
-    -DCMAKE_CXX_FLAGS="-march=armv8.2-a+dotprod" \
-    -DGGML_OPENMP=OFF \
-    -DGGML_LLAMAFILE=OFF
-
-
--DVulkan_INCLUDE_DIR=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include \
--DVulkan_LIBRARY=$NDK/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/28/libvulkan.so
+    -DGGML_OPENCL=OFF \
+    -DGGML_VULKAN=OFF \
+    -DGGML_BLAS=OFF \
+    -DGGML_STATIC=ON \
+    -DCMAKE_BUILD_TYPE=Release
