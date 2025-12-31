@@ -55,12 +55,10 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
+# 关键在于设置正确的 -march 参数来开启 fp16 指令集
 cmake .. \
-    -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
+    -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
     -DANDROID_ABI=arm64-v8a \
-    -DANDROID_PLATFORM=android-28 \
-    -DGGML_OPENCL=OFF \
-    -DGGML_VULKAN=OFF \
-    -DGGML_BLAS=OFF \
-    -DGGML_STATIC=ON \
-    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_C_FLAGS="-march=armv8.2-a+fp16+dotprod" \
+    -DCMAKE_CXX_FLAGS="-march=armv8.2-a+fp16+dotprod" \
+    -DGGML_OPENMP=OFF  # 手机上多核同步开销大，有时关闭反而更快
