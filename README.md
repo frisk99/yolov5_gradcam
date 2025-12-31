@@ -55,18 +55,8 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 
-mkdir build-android
-cd build-android
-
 cmake .. \
     -DCMAKE_TOOLCHAIN_FILE=$NDK/build/cmake/android.toolchain.cmake \
-    -DANDROID_ABI=arm64-v8a \
-    -DANDROID_PLATFORM=android-28 \
-    -DCMAKE_C_FLAGS="-march=armv8.2-a+dotprod+fp16" \
-    -DCMAKE_CXX_FLAGS="-march=armv8.2-a+dotprod+fp16" \
     -DGGML_VULKAN=ON \
-    -DGLSLC_EXECUTABLE=/usr/bin/glslc \
-    -DGGML_OPENMP=OFF
-
-# 开始编译
-cmake --build . --config Release -j$(nproc)
+    -DGLSLC_EXECUTABLE=$NDK/shader-tools/linux-x86_64/glslc \
+    ... 其他参数
