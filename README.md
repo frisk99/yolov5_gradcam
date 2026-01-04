@@ -54,11 +54,11 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-
 cmake .. \
     -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
     -DANDROID_ABI=arm64-v8a \
     -DANDROID_PLATFORM=android-26 \
     -DGGML_VULKAN=ON \
-    -DGGML_VULKAN_CHECK_RESULTS=OFF \
-    -DGGML_VULKAN_DEBUG=OFF
+    -DGGML_VULKAN_EMBED_SHADERS=ON \
+    -DGLSLANG_VALIDATOR=$(which glslangValidator)
+
