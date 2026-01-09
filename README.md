@@ -54,56 +54,58 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import cv2
-import numpy as np
-from PIL import Image
+import subprocess
+import time
 
-def video_to_9_grid(video_path, output_path="grid_output.jpg", grid_size=(3, 3)):
-    # 1. 读取视频
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        print("无法打开视频")
-        return
-
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+def run_adb_interactive():
+    # 1. 启动 adb shell 并运行你的程序
+    # xxx 是你的可执行程序路径，例如 /data/local/tmp/xxx
+    cmd = ["adb", "shell", "/data/local/tmp/xxx"]
     
-    # 2. 计算等间距的 9 帧索引 (均匀采样)
-    # 取从第 0 帧到最后一帧之间的 9 个点
-    frame_indices = np.linspace(0, total_frames - 1, grid_size[0] * grid_size[1], dtype=int)
-    
-    frames = []
-    for idx in frame_indices:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
-        ret, frame = cap.read()
-        if ret:
-            # 转换为 RGB (OpenCV 默认是 BGR)
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frames.append(frame)
-        else:
-            # 如果读取失败，补一张黑图
-            h, w, _ = frames[0].shape if frames else (224, 224, 3)
-            frames.append(np.zeros((h, w, 3), dtype=np.uint8))
+    # stdout=PIPE: 捕获输出
+    # stdin=PIPE: 允许写入输入
+    # text=True: 以字符串模式处理（Python 3.7+），旧版本用 universal_newlines=True
+    process = subprocess.Popen(
+        cmd, 
+        stdin=subprocess.PIPE, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.STDOUT, 
+        text=True,
+        bufsize=1 # 行缓冲
+    )
 
-    cap.release()
+    print("正在等待程序加载...")
 
-    # 3. 统一图片大小 (可选，建议统一以保证网格整齐)
-    # 假设每张子图缩放到 512x512
-    target_size = (512, 512)
-    resized_frames = [cv2.resize(f, target_size) for f in frames]
+    # 2. 读取输出直到发现特定的“加载完成”标志
+    while True:
+        line = process.stdout.readline()
+        if not line:
+            break
+        
+        print(f"[Device]: {line.strip()}")
+        
+        # 假设程序加载完后会打印 "Ready" 或 "Enter command:"
+        if "Ready" in line or ">" in line: 
+            print("--- 检测到加载完成，正在发送命令 ---")
+            break
 
-    # 4. 拼接成九宫格
-    # 将 9 张图分成 3 行，每行 3 张
-    rows = []
-    for i in range(0, 9, 3):
-        row = np.hstack(resized_frames[i:i+3]) # 水平拼接
-        rows.append(row)
-    
-    grid_image = np.vstack(rows) # 垂直拼接
+    # 3. 输入你的命令 (cmd)
+    # 注意要加上 \n 换行符模拟回车
+    your_cmd = "my_command_here\n"
+    process.stdin.write(your_cmd)
+    process.stdin.flush() # 强制刷新缓冲区，确保命令发送出去
 
-    # 5. 保存结果
-    final_img = Image.fromarray(grid_image)
-    final_img.save(output_path)
-    print(f"九宫格图片已保存至: {output_path}")
+    # 4. 获取后续的输出
+    # 如果命令执行完程序就退出，可以用 process.communicate()
+    # 如果程序继续运行，可以继续用 readline()
+    for line in process.stdout:
+        print(f"[Result]: {line.strip()}")
+        # 这里可以根据特定的结束标志 break 循环
+        if "Done" in line:
+            break
 
-# 使用示例
-video_to_9_grid("your_video.mp4")
+    # 5. 清理并关闭
+    process.terminate()
+
+if __name__ == "__main__":
+    run_adb_interactive()
