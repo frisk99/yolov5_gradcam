@@ -55,57 +55,67 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 import subprocess
-import time
+import sys
 
-def run_adb_interactive():
-    # 1. 启动 adb shell 并运行你的程序
-    # xxx 是你的可执行程序路径，例如 /data/local/tmp/xxx
-    cmd = ["adb", "shell", "/data/local/tmp/xxx"]
-    
-    # stdout=PIPE: 捕获输出
-    # stdin=PIPE: 允许写入输入
-    # text=True: 以字符串模式处理（Python 3.7+），旧版本用 universal_newlines=True
+def run_llm_auto_stop(output_file="llm_result.txt"):
+    # 1. 启动子进程 (根据实际情况修改命令)
+    # 示例: ["adb", "shell", "-t", "./llama-cli -m ..."] 或 ["python3", "demo.py"]
+    cmd = ["python3", "your_llm_demo.py"] 
+
     process = subprocess.Popen(
-        cmd, 
-        stdin=subprocess.PIPE, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.STDOUT, 
+        cmd,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
         text=True,
-        bufsize=1 # 行缓冲
+        bufsize=0  # 无缓冲，确保实时性
     )
 
-    print("正在等待程序加载...")
-
-    # 2. 读取输出直到发现特定的“加载完成”标志
-    while True:
-        line = process.stdout.readline()
-        if not line:
-            break
+    with open(output_file, "w", encoding="utf-8") as f:
+        print(f"--- 任务启动，实时记录至 {output_file} ---")
         
-        print(f"[Device]: {line.strip()}")
+        output_buffer = "" # 用于匹配关键词的缓冲区
+        command_sent = False
         
-        # 假设程序加载完后会打印 "Ready" 或 "Enter command:"
-        if "Ready" in line or ">" in line: 
-            print("--- 检测到加载完成，正在发送命令 ---")
-            break
+        while True:
+            # 2. 逐字符读取输出
+            char = process.stdout.read(1)
+            if not char:
+                break
+            
+            # 实时显示和写入文件
+            sys.stdout.write(char)
+            sys.stdout.flush()
+            f.write(char)
+            f.flush()
 
-    # 3. 输入你的命令 (cmd)
-    # 注意要加上 \n 换行符模拟回车
-    your_cmd = "my_command_here\n"
-    process.stdin.write(your_cmd)
-    process.stdin.flush() # 强制刷新缓冲区，确保命令发送出去
+            # 将字符加入缓冲区
+            output_buffer += char
+            
+            # 3. 逻辑判断：等待加载完成发送命令
+            if not command_sent:
+                # 这里假设加载完出现的提示符是 "Input:" 或 ">"
+                if "Input:" in output_buffer or ">" in output_buffer:
+                    print("\n[系统] 检测到加载完成，发送指令...")
+                    my_prompt = "请用50字介绍量子力学。\n"
+                    process.stdin.write(my_prompt)
+                    process.stdin.flush()
+                    
+                    f.write(f"\n[Sent Command]: {my_prompt}\n")
+                    command_sent = True
+                    output_buffer = "" # 清空缓冲区，开始监听结果
 
-    # 4. 获取后续的输出
-    # 如果命令执行完程序就退出，可以用 process.communicate()
-    # 如果程序继续运行，可以继续用 readline()
-    for line in process.stdout:
-        print(f"[Result]: {line.strip()}")
-        # 这里可以根据特定的结束标志 break 循环
-        if "Done" in line:
-            break
-
-    # 5. 清理并关闭
-    process.terminate()
+            # 4. 逻辑判断：检测到 "User:" 则结束
+            else:
+                # 如果缓冲区末尾出现了 "User:"，说明回答结束
+                if output_buffer.strip().endswith("User:"):
+                    print("\n\n[系统] 检测到 'User:' 标识，任务完成，正在退出...")
+                    break
+        
+        # 5. 清理工作
+        process.terminate() # 强制关闭子进程
+        process.wait()
+        print(f"--- 所有输出已保存至 {output_file} ---")
 
 if __name__ == "__main__":
-    run_adb_interactive()
+    run_llm_auto_stop()
