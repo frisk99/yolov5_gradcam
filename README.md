@@ -55,67 +55,80 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 import subprocess
-import sys
+import time
+import os
 
-def run_llm_auto_stop(output_file="llm_result.txt"):
-    # 1. 启动子进程 (根据实际情况修改命令)
-    # 示例: ["adb", "shell", "-t", "./llama-cli -m ..."] 或 ["python3", "demo.py"]
-    cmd = ["python3", "your_llm_demo.py"] 
+def run_with_file_monitor(output_file="output.txt", max_chars=3000):
+    # 1. 准备启动命令 (确保写死线程数 -t 16)
+    cmd = ["./your_executable", "-m", "model.gguf", "-t", "16"]
+    
+    # 2. 以写入模式打开文件，并将 stdout/stderr 全都指向它
+    with open(output_file, "w", encoding="utf-8") as f_out:
+        process = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,  # 只有输入留着管道，用于发命令
+            stdout=f_out,           # 输出直接去文件，不经过 Python 管道
+            stderr=f_out,           # 错误日志也去文件
+            text=True,
+            bufsize=1
+        )
 
-    process = subprocess.Popen(
-        cmd,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        bufsize=0  # 无缓冲，确保实时性
-    )
+    print(f"--- 程序已启动，输出实时重定向至 {output_file} ---")
 
-    with open(output_file, "w", encoding="utf-8") as f:
-        print(f"--- 任务启动，实时记录至 {output_file} ---")
+    # 3. 阶段一：等待加载完毕 (由于加载很快，这里每 2 秒看一次)
+    command_sent = False
+    while not command_sent:
+        time.sleep(2)
+        if os.path.exists(output_file):
+            with open(output_file, "r", encoding="utf-8") as f_check:
+                content = f_check.read()
+                # 检查是否出现了提示符
+                if "Input:" in content or ">" in content:
+                    print("[系统] 检测到就绪，发送指令...")
+                    process.stdin.write("请详细介绍量子力学\n")
+                    process.stdin.flush()
+                    command_sent = True
         
-        output_buffer = "" # 用于匹配关键词的缓冲区
-        command_sent = False
+        if process.poll() is not None:
+            print("错误：程序在加载阶段意外退出。")
+            return
+
+    # 4. 阶段二：每分钟监听一次结果
+    print("--- 指令已发送，进入分钟级监控模式 ---")
+    while True:
+        time.sleep(60) # 每一分钟监听一次
         
-        while True:
-            # 2. 逐字符读取输出
-            char = process.stdout.read(1)
-            if not char:
+        if not os.path.exists(output_file):
+            continue
+            
+        with open(output_file, "r", encoding="utf-8") as f_check:
+            # 移动到文件末尾检查最后一部分内容
+            content = f_check.read()
+            char_count = len(content)
+            
+            print(f"[{time.strftime('%H:%M:%S')}] 当前字符数: {char_count}")
+
+            # 条件判断：是否输出完毕
+            # 检查最后 100 个字符里是否有 User:
+            last_segment = content[-100:] 
+            if "User:" in last_segment:
+                print("[系统] 检测到 'User:' 标识，任务完成。")
                 break
             
-            # 实时显示和写入文件
-            sys.stdout.write(char)
-            sys.stdout.flush()
-            f.write(char)
-            f.flush()
+            # 条件判断：是否超过 3000 字
+            if char_count > max_chars:
+                print(f"[系统] 字数已达 {char_count}，超过上限 {max_chars}，强制终止。")
+                break
 
-            # 将字符加入缓冲区
-            output_buffer += char
-            
-            # 3. 逻辑判断：等待加载完成发送命令
-            if not command_sent:
-                # 这里假设加载完出现的提示符是 "Input:" 或 ">"
-                if "Input:" in output_buffer or ">" in output_buffer:
-                    print("\n[系统] 检测到加载完成，发送指令...")
-                    my_prompt = "请用50字介绍量子力学。\n"
-                    process.stdin.write(my_prompt)
-                    process.stdin.flush()
-                    
-                    f.write(f"\n[Sent Command]: {my_prompt}\n")
-                    command_sent = True
-                    output_buffer = "" # 清空缓冲区，开始监听结果
+        # 检查进程是否还在跑
+        if process.poll() is not None:
+            print("[系统] 进程已自行结束。")
+            break
 
-            # 4. 逻辑判断：检测到 "User:" 则结束
-            else:
-                # 如果缓冲区末尾出现了 "User:"，说明回答结束
-                if output_buffer.strip().endswith("User:"):
-                    print("\n\n[系统] 检测到 'User:' 标识，任务完成，正在退出...")
-                    break
-        
-        # 5. 清理工作
-        process.terminate() # 强制关闭子进程
-        process.wait()
-        print(f"--- 所有输出已保存至 {output_file} ---")
+    # 5. 任务结束，清理
+    process.terminate()
+    process.wait()
+    print(f"--- 运行全过程已记录在 {output_file} ---")
 
 if __name__ == "__main__":
-    run_llm_auto_stop()
+    run_with_file_monitor()
