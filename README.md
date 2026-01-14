@@ -54,81 +54,21 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import subprocess
-import time
-import os
+import MNN.expr as F
+import numpy as np
 
-def run_with_file_monitor(output_file="output.txt", max_chars=3000):
-    # 1. 准备启动命令 (确保写死线程数 -t 16)
-    cmd = ["./your_executable", "-m", "model.gguf", "-t", "16"]
-    
-    # 2. 以写入模式打开文件，并将 stdout/stderr 全都指向它
-    with open(output_file, "w", encoding="utf-8") as f_out:
-        process = subprocess.Popen(
-            cmd,
-            stdin=subprocess.PIPE,  # 只有输入留着管道，用于发命令
-            stdout=f_out,           # 输出直接去文件，不经过 Python 管道
-            stderr=f_out,           # 错误日志也去文件
-            text=True,
-            bufsize=1
-        )
+# 1. 加载模型文件中的所有变量
+# load_as_dict 会返回一个字典，Key 是模型中的节点名称
+vars = F.load_as_dict("your_embeddings.mnn")
 
-    print(f"--- 程序已启动，输出实时重定向至 {output_file} ---")
+# 2. 打印所有的 Key，看看你的词嵌入矩阵叫什么名字
+print("模型中的变量名:", vars.keys())
 
-    # 3. 阶段一：等待加载完毕 (由于加载很快，这里每 2 秒看一次)
-    command_sent = False
-    while not command_sent:
-        time.sleep(2)
-        if os.path.exists(output_file):
-            with open(output_file, "r", encoding="utf-8") as f_check:
-                content = f_check.read()
-                # 检查是否出现了提示符
-                if "Input:" in content or ">" in content:
-                    print("[系统] 检测到就绪，发送指令...")
-                    process.stdin.write("请详细介绍量子力学\n")
-                    process.stdin.flush()
-                    command_sent = True
-        
-        if process.poll() is not None:
-            print("错误：程序在加载阶段意外退出。")
-            return
+# 3. 假设你的词嵌入变量名为 'embedding_weight'
+# 注意：你需要根据打印出来的结果替换这个名字
+embedding_var = vars["embedding_weight"] 
 
-    # 4. 阶段二：每分钟监听一次结果
-    print("--- 指令已发送，进入分钟级监控模式 ---")
-    while True:
-        time.sleep(60) # 每一分钟监听一次
-        
-        if not os.path.exists(output_file):
-            continue
-            
-        with open(output_file, "r", encoding="utf-8") as f_check:
-            # 移动到文件末尾检查最后一部分内容
-            content = f_check.read()
-            char_count = len(content)
-            
-            print(f"[{time.strftime('%H:%M:%S')}] 当前字符数: {char_count}")
-
-            # 条件判断：是否输出完毕
-            # 检查最后 100 个字符里是否有 User:
-            last_segment = content[-100:] 
-            if "User:" in last_segment:
-                print("[系统] 检测到 'User:' 标识，任务完成。")
-                break
-            
-            # 条件判断：是否超过 3000 字
-            if char_count > max_chars:
-                print(f"[系统] 字数已达 {char_count}，超过上限 {max_chars}，强制终止。")
-                break
-
-        # 检查进程是否还在跑
-        if process.poll() is not None:
-            print("[系统] 进程已自行结束。")
-            break
-
-    # 5. 任务结束，清理
-    process.terminate()
-    process.wait()
-    print(f"--- 运行全过程已记录在 {output_file} ---")
-
-if __name__ == "__main__":
-    run_with_file_monitor()
+# 4. 转换为 Numpy 格式
+embedding_matrix = embedding_var.read()
+print(f"词嵌入矩阵形状: {embedding_matrix.shape}")
+print(embedding_matrix)
