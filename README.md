@@ -54,21 +54,71 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import MNN.expr as F
-import numpy as np
+import torch
+from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
+from qwen_vl_utils import process_vision_info
 
-# 1. 加载模型文件中的所有变量
-# load_as_dict 会返回一个字典，Key 是模型中的节点名称
-vars = F.load_as_dict("your_embeddings.mnn")
+# 1. 加载模型
+# 注意：这里使用的是 Qwen3VLForConditionalGeneration
+model_path = "Qwen/Qwen3-VL-8B-Instruct"
 
-# 2. 打印所有的 Key，看看你的词嵌入矩阵叫什么名字
-print("模型中的变量名:", vars.keys())
+# 建议使用 flash_attention_2 以提高长视频处理效率（需要硬件支持）
+model = Qwen3VLForConditionalGeneration.from_pretrained(
+    model_path,
+    torch_dtype=torch.bfloat16,
+    attn_implementation="flash_attention_2",
+    device_map="auto",
+)
 
-# 3. 假设你的词嵌入变量名为 'embedding_weight'
-# 注意：你需要根据打印出来的结果替换这个名字
-embedding_var = vars["embedding_weight"] 
+processor = AutoProcessor.from_pretrained(model_path)
 
-# 4. 转换为 Numpy 格式
-embedding_matrix = embedding_var.read()
-print(f"词嵌入矩阵形状: {embedding_matrix.shape}")
-print(embedding_matrix)
+# 2. 构造输入 (视频)
+video_path = "./demo_video.mp4" # 替换您的本地路径
+
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "video",
+                "video": video_path,
+                # Qwen3-VL 原生支持长上下文，但为了显存安全，建议手动限制帧数或 FPS
+                # "fps": 1.0, 
+                # "nframes": 16, # 如果视频太长，可以强制只取16帧
+            },
+            {
+                "type": "text",
+                "text": "请详细分析这段视频的内容。"
+            },
+        ],
+    }
+]
+
+# 3. 数据预处理
+# process_vision_info 依然是通用的工具，用来提取视频帧
+image_inputs, video_inputs = process_vision_info(messages)
+
+inputs = processor(
+    text=[processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)],
+    images=image_inputs,
+    videos=video_inputs,
+    padding=True,
+    return_tensors="pt",
+)
+
+# 移至 GPU
+inputs = inputs.to(model.device)
+
+# 4. 生成描述
+# Qwen3-VL 支持超长上下文（原生256K），生成的 max_new_tokens 可以设大一点
+generated_ids = model.generate(**inputs, max_new_tokens=512)
+
+# 5. 解码
+generated_ids_trimmed = [
+    out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+]
+output_text = processor.batch_decode(
+    generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
+)
+
+print(output_text[0])
