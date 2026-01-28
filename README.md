@@ -55,45 +55,90 @@ Solve the custom dataset gradient not match.
 
 ```cpp
 import asyncio
-from pydantic_ai import Agent
+from pydantic import BaseModel
+from pydantic_ai import Agent, RunContext, ModelRetry
 from pydantic_ai.models.openai import OpenAIModel
+import os
 
-# 1. 配置模型连接到本地 vLLM
-# vLLM 默认地址通常是 http://localhost:8000/v1
-# api_key 随便填一个字符串即可，本地服务通常不校验
-model = OpenAIModel(
-    'my-local-model',  # 必须与 vLLM 启动参数 --served-model-name 一致
-    base_url='http://localhost:8000/v1',
-    api_key='EMPTY'
-)
+# 配置本地 vLLM
+os.environ["OPENAI_BASE_URL"] = "http://localhost:8000/v1"
+os.environ["OPENAI_API_KEY"] = "EMPTY"
 
-# 2. 定义 Agent
-# 这里我们定义一个简单的数学助手 Agent
+# --- 1. 定义环境状态 (模拟真实的物理设备) ---
+class DeviceState(BaseModel):
+    temperature: float = 95.0  # 初始温度很高
+    fan_speed: int = 0
+    is_shutdown: bool = False
+    
+    # 模拟环境变化：每次读取温度时，根据设备状态改变温度
+    def update_physics(self):
+        if self.is_shutdown:
+            self.temperature = 25.0 # 关机后冷却
+        elif self.fan_speed > 0:
+            self.temperature -= 2.0 # 风扇开启，温度微降（模拟降温不够快的情况）
+        else:
+            self.temperature += 1.0 # 没风扇，温度持续升高
+
+# --- 2. 定义 Agent 和 依赖 ---
+model = OpenAIModel('my-local-model')
+
+# 定义 Agent，设置最大循环次数为 5 次，防止死循环
 agent = Agent(
     model,
-    system_prompt='你是一个乐于助人的数学助手。请用简洁的方式回答问题。',
+    deps_type=DeviceState,
+    result_type=str, # 最终返回一个文本报告
+    system_prompt=(
+        "你是一名高级设备操作员。你的目标是将设备温度控制在 80°C 以下。\n"
+        "你可以使用工具来检查温度和操作设备。\n"
+        "规则：\n"
+        "1. 先检查温度 (Perception)。\n"
+        "2. 如果过热，尝试开启风扇 (Action)。\n"
+        "3. 操作后，**必须**再次检查温度以确认效果 (Observation & Reflection)。\n"
+        "4. 如果风扇无法有效降温且温度仍危急 (>90°C)，必须执行紧急关机！"
+    )
 )
 
-# 3. 运行 Agent (异步方式)
+# --- 3. 定义工具 (Agent 的手脚) ---
+
+@agent.tool
+def read_temperature(ctx: RunContext[DeviceState]) -> str:
+    """读取当前设备的核心温度传感器。"""
+    ctx.deps.update_physics() # 模拟时间流逝导致的环境变化
+    temp = ctx.deps.temperature
+    print(f"👁️ [感知] 读取温度: {temp}°C")
+    return f"{temp}°C"
+
+@agent.tool
+def set_fan_speed(ctx: RunContext[DeviceState], speed_percent: int) -> str:
+    """设置风扇转速 (0-100)。"""
+    print(f"✋ [行动] 设置风扇转速: {speed_percent}%")
+    ctx.deps.fan_speed = speed_percent
+    return "风扇已设定，正在运行。"
+
+@agent.tool
+def emergency_shutdown(ctx: RunContext[DeviceState]) -> str:
+    """执行紧急断电关机。仅在其他手段无效时使用。"""
+    print(f"🛑 [行动] !!! 执行紧急关机 !!!")
+    ctx.deps.is_shutdown = True
+    return "设备已切断电源，正在强制冷却。"
+
+# --- 4. 运行 Agentic Loop ---
+
 async def main():
-    try:
-        # 发送简单的文本 Prompt
-        prompt = "如果我有3个苹果，吃掉了1个，还剩几个？请用JSON格式回答：{\"remaining\": int}"
-        
-        print(f"User: {prompt}")
-        print("-" * 20)
-        
-        # 获取响应
-        result = await agent.run(prompt)
-        
-        print(f"AI: {result.data}")
-        
-        # 打印使用 Token 统计 (vLLM 会返回这些信息)
-        print("-" * 20)
-        print(f"Usage: {result.usage()}")
-        
-    except Exception as e:
-        print(f"Error: {e}")
+    # 初始化设备状态
+    device = DeviceState()
+    
+    print(f"--- 任务开始: 监控并处理设备 (初始温度: {device.temperature}) ---")
+    
+    # 这一句 run() 包含了整个 思考->行动->观察->再思考 的循环
+    result = await agent.run(
+        "警报：核心模块温度异常，请处理。",
+        deps=device
+    )
+    
+    print("\n--- 任务结束 ---")
+    print(f"AI 最终报告: {result.data}")
+    print(f"设备最终状态: 温度={device.temperature}, 关机={device.is_shutdown}")
 
 if __name__ == '__main__':
     asyncio.run(main())
