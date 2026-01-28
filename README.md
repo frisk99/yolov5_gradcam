@@ -54,71 +54,46 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import torch
-from transformers import Qwen3VLForConditionalGeneration, AutoProcessor
-from qwen_vl_utils import process_vision_info
+import asyncio
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIModel
 
-# 1. 加载模型
-# 注意：这里使用的是 Qwen3VLForConditionalGeneration
-model_path = "Qwen/Qwen3-VL-8B-Instruct"
-
-# 建议使用 flash_attention_2 以提高长视频处理效率（需要硬件支持）
-model = Qwen3VLForConditionalGeneration.from_pretrained(
-    model_path,
-    torch_dtype=torch.bfloat16,
-    attn_implementation="flash_attention_2",
-    device_map="auto",
+# 1. 配置模型连接到本地 vLLM
+# vLLM 默认地址通常是 http://localhost:8000/v1
+# api_key 随便填一个字符串即可，本地服务通常不校验
+model = OpenAIModel(
+    'my-local-model',  # 必须与 vLLM 启动参数 --served-model-name 一致
+    base_url='http://localhost:8000/v1',
+    api_key='EMPTY'
 )
 
-processor = AutoProcessor.from_pretrained(model_path)
-
-# 2. 构造输入 (视频)
-video_path = "./demo_video.mp4" # 替换您的本地路径
-
-messages = [
-    {
-        "role": "user",
-        "content": [
-            {
-                "type": "video",
-                "video": video_path,
-                # Qwen3-VL 原生支持长上下文，但为了显存安全，建议手动限制帧数或 FPS
-                # "fps": 1.0, 
-                # "nframes": 16, # 如果视频太长，可以强制只取16帧
-            },
-            {
-                "type": "text",
-                "text": "请详细分析这段视频的内容。"
-            },
-        ],
-    }
-]
-
-# 3. 数据预处理
-# process_vision_info 依然是通用的工具，用来提取视频帧
-image_inputs, video_inputs = process_vision_info(messages)
-
-inputs = processor(
-    text=[processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)],
-    images=image_inputs,
-    videos=video_inputs,
-    padding=True,
-    return_tensors="pt",
+# 2. 定义 Agent
+# 这里我们定义一个简单的数学助手 Agent
+agent = Agent(
+    model,
+    system_prompt='你是一个乐于助人的数学助手。请用简洁的方式回答问题。',
 )
 
-# 移至 GPU
-inputs = inputs.to(model.device)
+# 3. 运行 Agent (异步方式)
+async def main():
+    try:
+        # 发送简单的文本 Prompt
+        prompt = "如果我有3个苹果，吃掉了1个，还剩几个？请用JSON格式回答：{\"remaining\": int}"
+        
+        print(f"User: {prompt}")
+        print("-" * 20)
+        
+        # 获取响应
+        result = await agent.run(prompt)
+        
+        print(f"AI: {result.data}")
+        
+        # 打印使用 Token 统计 (vLLM 会返回这些信息)
+        print("-" * 20)
+        print(f"Usage: {result.usage()}")
+        
+    except Exception as e:
+        print(f"Error: {e}")
 
-# 4. 生成描述
-# Qwen3-VL 支持超长上下文（原生256K），生成的 max_new_tokens 可以设大一点
-generated_ids = model.generate(**inputs, max_new_tokens=512)
-
-# 5. 解码
-generated_ids_trimmed = [
-    out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-]
-output_text = processor.batch_decode(
-    generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
-)
-
-print(output_text[0])
+if __name__ == '__main__':
+    asyncio.run(main())
