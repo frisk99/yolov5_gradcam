@@ -54,62 +54,52 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import operator
-from typing import Annotated, TypedDict, Union
-from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_core.tools import tool
-from langgraph.graph import StateGraph, START, END
-from langgraph.prebuilt import ToolNode, tools_condition
-from langgraph.graph.message import add_messages
-from langchain_openai import ChatOpenAI
+import json
+import httpx
+from rich import print as rprint  # 建议安装 rich 库，看的更清楚
 
-# --- 定义工具 ---
-@tool
-def calculate_multiply(a: int, b: int) -> int:
-    """计算乘法"""
-    print(f"\n>>>>>> [DEBUG] 终于进来了！正在计算: {a} * {b} <<<<<<\n") # 你的 Print
-    return a * b
+# 保存原始的发送方法
+_original_send = httpx.Client.send
+_original_async_send = httpx.AsyncClient.send
 
-tools = [calculate_multiply]
+def log_payload(request):
+    """拦截并打印请求体"""
+    if b"chat/completions" in request.url.path:
+        print("\n" + "="*20 + " 抓获发送给 vLLM 的请求 " + "="*20)
+        try:
+            # 解码 bytes 为 json
+            body = json.loads(request.read().decode('utf-8'))
+            
+            # 1. 打印 Messages (对话历史)
+            rprint("[bold yellow]Messages:[/bold yellow]")
+            rprint(body.get("messages", []))
+            
+            # 2. 打印 Tools (这也就是你找的JSON Schema Prompt!)
+            if "tools" in body:
+                rprint("\n[bold green]Tools (隐形的 Prompt 核心):[/bold green]")
+                rprint(body["tools"])
+            
+            # 3. 打印 Tool Choice
+            if "tool_choice" in body:
+                 print(f"\nTool Choice: {body['tool_choice']}")
+                 
+        except Exception as e:
+            print(f"解析失败: {e}")
+        print("="*60 + "\n")
 
-# --- 设置 LLM (请替换你的 vLLM 地址) ---
-llm = ChatOpenAI(
-    base_url="http://localhost:8000/v1", 
-    api_key="EMPTY", 
-    model="qwen-vllm", # 确保模型名正确
-    temperature=0
-).bind_tools(tools)
+# 劫持同步请求
+def new_send(self, request, *args, **kwargs):
+    log_payload(request)
+    return _original_send(self, request, *args, **kwargs)
 
-# --- 构建图 ---
-class State(TypedDict):
-    messages: Annotated[list, add_messages]
+# 劫持异步请求 (LangGraph 通常用这个)
+async def new_async_send(self, request, *args, **kwargs):
+    log_payload(request)
+    return await _original_async_send(self, request, *args, **kwargs)
 
-def chatbot(state: State):
-    return {"messages": [llm.invoke(state["messages"])]}
+# 应用补丁
+httpx.Client.send = new_send
+httpx.AsyncClient.send = new_async_send
 
-builder = StateGraph(State)
-builder.add_node("chatbot", chatbot)
-builder.add_node("tools", ToolNode(tools)) # 关键：添加工具节点
-
-builder.add_edge(START, "chatbot")
-# 关键：条件路由
-builder.add_conditional_edges("chatbot", tools_condition)
-builder.add_edge("tools", "chatbot") # 关键：闭环
-
-graph = builder.compile()
-
-# --- 运行并观察 ---
-print("开始测试...")
-inputs = {"messages": [HumanMessage(content="计算 3 乘以 8")]}
-
-for event in graph.stream(inputs):
-    for node_name, value in event.items():
-        print(f"--- 当前执行节点: {node_name} ---")
-        if node_name == "chatbot":
-            msg = value["messages"][-1]
-            if not msg.tool_calls:
-                print("❌ LLM 没有发起工具调用 (tool_calls 为空)")
-            else:
-                print(f"✅ LLM 发起了调用: {msg.tool_calls}")
-        elif node_name == "tools":
-            print("✅ 成功进入 Tools 节点 (你应该能在上方看到 DEBUG print)")
+# --- 下面写你原本的 LangGraph 代码 ---
+# app.invoke(...)
