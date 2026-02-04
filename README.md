@@ -54,52 +54,65 @@ Solve the custom dataset gradient not match.
 
 
 ```cpp
-import json
-import httpx
-from rich import print as rprint  # 建议安装 rich 库，看的更清楚
+from langgraph.channels import LastValue
+from langgraph.pregel import Pregel, NodeBuilder
 
-# 保存原始的发送方法
-_original_send = httpx.Client.send
-_original_async_send = httpx.AsyncClient.send
+# ===== 定义节点 =====
 
-def log_payload(request):
-    """拦截并打印请求体"""
-    if b"chat/completions" in request.url.path:
-        print("\n" + "="*20 + " 抓获发送给 vLLM 的请求 " + "="*20)
-        try:
-            # 解码 bytes 为 json
-            body = json.loads(request.read().decode('utf-8'))
-            
-            # 1. 打印 Messages (对话历史)
-            rprint("[bold yellow]Messages:[/bold yellow]")
-            rprint(body.get("messages", []))
-            
-            # 2. 打印 Tools (这也就是你找的JSON Schema Prompt!)
-            if "tools" in body:
-                rprint("\n[bold green]Tools (隐形的 Prompt 核心):[/bold green]")
-                rprint(body["tools"])
-            
-            # 3. 打印 Tool Choice
-            if "tool_choice" in body:
-                 print(f"\nTool Choice: {body['tool_choice']}")
-                 
-        except Exception as e:
-            print(f"解析失败: {e}")
-        print("="*60 + "\n")
+# Node1: 读取 input，写入 channel_a
+node1 = (
+    NodeBuilder()
+    .subscribe_only("input")
+    .do(lambda x: print(f"  [执行阶段] Node1 开始执行，读取 input: {x}") or x)
+    .do(lambda x: print(f"  [执行阶段] Node1 计算中...") or x + " -> processed")
+    .do(lambda x: print(f"  [执行阶段] Node1 完成，将写入 channel_a") or x)
+    .write_to("channel_a")
+)
 
-# 劫持同步请求
-def new_send(self, request, *args, **kwargs):
-    log_payload(request)
-    return _original_send(self, request, *args, **kwargs)
+# Node2: 读取 channel_a，写入 channel_b
+node2 = (
+    NodeBuilder()
+    .subscribe_only("channel_a")
+    .do(lambda x: print(f"  [执行阶段] Node2 开始执行，读取 channel_a: {x}") or x)
+    .do(lambda x: print(f"  [执行阶段] Node2 计算中...") or x + " -> further processed")
+    .do(lambda x: print(f"  [执行阶段] Node2 完成，将写入 channel_b") or x)
+    .write_to("channel_b")
+)
 
-# 劫持异步请求 (LangGraph 通常用这个)
-async def new_async_send(self, request, *args, **kwargs):
-    log_payload(request)
-    return await _original_async_send(self, request, *args, **kwargs)
+# Node3: 读取 channel_b，写入 output
+node3 = (
+    NodeBuilder()
+    .subscribe_only("channel_b")
+    .do(lambda x: print(f"  [执行阶段] Node3 开始执行，读取 channel_b: {x}") or x)
+    .do(lambda x: print(f"  [执行阶段] Node3 计算中...") or x + " -> final")
+    .do(lambda x: print(f"  [执行阶段] Node3 完成，将写入 output") or x)
+    .write_to("output")
+)
 
-# 应用补丁
-httpx.Client.send = new_send
-httpx.AsyncClient.send = new_async_send
+# ===== 创建 Pregel 应用 =====
 
-# --- 下面写你原本的 LangGraph 代码 ---
-# app.invoke(...)
+app = Pregel(
+    nodes={"node1": node1, "node2": node2, "node3": node3},
+    channels={
+        "input": LastValue(str),
+        "channel_a": LastValue(str),
+        "channel_b": LastValue(str),
+        "output": LastValue(str),
+    },
+    input_channels=["input"],
+    output_channels=["output"],
+    debug=True,  # 启用调试模式
+)
+
+# ===== 运行应用并观察输出 =====
+
+print("\n" + "="*60)
+print("开始执行 Pregel 应用")
+print("="*60)
+
+result = app.invoke({"input": "Hello"})
+
+print("\n" + "="*60)
+print("执行完成")
+print("="*60)
+print(f"最终结果: {result}")
