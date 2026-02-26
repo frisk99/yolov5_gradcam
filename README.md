@@ -45,11 +45,31 @@ This problem is solved in version 6.1
 Solve the custom dataset gradient not match.
 
 # References
-1. https://github.com/1Konny/gradcam_plus_plus-pytorch
-2. https://github.com/ultralytics/yolov5
-3. https://github.com/pooya-mohammadi/deep_utils
-4. https://github.com/pooya-mohammadi/yolov5-gradcam
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 
+def analyze_node(state: InspectionState):
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    
+    # 【纯英文 Prompt】：精准定义角色、任务、条件和输出格式
+    sys_prompt = f"""You are an advanced security visual analysis agent.
+Your task is to observe the provided surveillance data and determine if it triggers a specific condition.
 
+[Trigger Condition]: {state['condition']}
 
+Rules:
+1. Carefully compare the visual data against the [Trigger Condition].
+2. If the visual data STRICTLY MATCHES the condition, reply with exactly "YES".
+3. If it does not match, or the scene is normal, reply with exactly "NO".
+4. Do not output any additional explanation, formatting, or punctuation."""
 
+    messages = [
+        SystemMessage(content=sys_prompt),
+        HumanMessage(content=f"Surveillance Data: {state['camera_data']}")
+    ]
+    
+    response = llm.invoke(messages).content.strip().upper()
+    should_alert = "YES" in response
+    
+    print(f"[Analyze Node] Condition: '{state['condition']}' | Response: {response}")
+    return {"should_alert": should_alert}
