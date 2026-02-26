@@ -243,3 +243,135 @@ if __name__ == "__main__":
         "messages": []
     }
     app.invoke(state_3)
+import os
+import cv2
+import base64
+from typing import TypedDict, List, Literal
+from pydantic import BaseModel, Field
+from langgraph.graph import StateGraph, START, END
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
+
+
+class AnswerItem(BaseModel):
+    question_id: int = Field(description="问题的序号，从 1 开始")
+    answer: Literal["yes", "no"] = Field(description="该问题的答案，只能是 yes 或 no")
+
+class VideoQAResponse(BaseModel):
+    results: list[AnswerItem] = Field(description="视频问答结果的列表")
+
+
+class GraphState(TypedDict):
+    video_path: str             # 本地视频文件的路径
+    questions: List[str]        # 提出的问题列表
+    final_result: VideoQAResponse
+
+
+def extract_frames_as_base64(video_path: str, interval_sec: int = 1, max_frames: int = 30) -> list[str]:
+    """
+    使用 OpenCV 读取视频，每隔 interval_sec 秒抽取一帧，并转换为 base64 字符串。
+    max_frames 用于保护 API 调用，避免传入超长视频导致显存溢出或费用过高。
+    """
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"无法打开视频文件: {video_path}")
+    
+    fps = round(cap.get(cv2.CAP_PROP_FPS))
+    if fps == 0:
+        fps = 30 
+        
+    frame_interval = int(fps * interval_sec) 
+    
+    base64_frames = []
+    frame_count = 0
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break 
+            
+        if frame_count % frame_interval == 0:
+            _, buffer = cv2.imencode('.jpg', frame)
+            b64_str = base64.b64encode(buffer).decode('utf-8')
+            base64_frames.append(b64_str)
+            
+            if len(base64_frames) >= max_frames:
+                print(f"[警告] 达到最大限制 {max_frames} 帧，已停止继续抽帧。")
+                break
+                
+        frame_count += 1
+        
+    cap.release()
+    print(f"[信息] 抽帧完成，共提取 {len(base64_frames)} 帧图片。")
+    return base64_frames
+
+def analyze_video_node(state: GraphState):
+
+    llm = ChatOpenAI(
+        temperature=0.1
+    )
+    
+    structured_llm = llm.with_structured_output(VideoQAResponse)
+
+
+    print(f"[处理中] 正在从 {state['video_path']} 提取视频帧...")
+    base64_frames = extract_frames_as_base64(state["video_path"], interval_sec=1)
+    
+
+    questions_text = "\n".join([
+        f"{i+1}. {q}" for i, q in enumerate(state["questions"])
+    ])
+
+
+    user_content = [
+        {
+            "type": "text", 
+            "text": f"这是一段视频按1秒1帧提取的连续画面。请仔细观察这些画面，并严格按照 JSON 格式以 yes 或 no 回答以下问题：\n\n{questions_text}"
+        }
+    ]
+
+    for b64_str in base64_frames:
+        user_content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{b64_str}"}
+        })
+
+    messages = [
+        SystemMessage(content="你是一个精准的多模态视频分析引擎。必须严格按照提供的 JSON Schema 输出结果，不要输出任何多余的解释。"),
+        HumanMessage(content=user_content)
+    ]
+    
+    print("[处理中] 正在调用 Qwen-VL 进行推理 (这可能需要十几秒)...")
+    response = structured_llm.invoke(messages)
+    
+    return {"final_result": response}
+
+workflow = StateGraph(GraphState)
+workflow.add_node("analyze_node", analyze_video_node)
+workflow.add_edge(START, "analyze_node")
+workflow.add_edge("analyze_node", END)
+app = workflow.compile()
+
+if __name__ == "__main__":
+    test_video_path = "1.mp4" 
+    
+    if not os.path.exists(test_video_path):
+        print(f"找不到测试视频: {test_video_path}，请放入一个视频文件后重试。")
+    else:
+        inputs = {
+            "video_path": test_video_path,
+            "questions": [
+                "视频中是否出现了人类？",
+                "视频的场景是在室外吗？",
+                "视频中是否出现了汽车？",
+                "画面中有人在跑步吗？"
+            ]
+        }
+
+        result_state = app.invoke(inputs)
+        final_answers = result_state["final_result"]
+        
+        print("\n=== ✨ 最终分析结果 ===")
+        for item in final_answers.results:
+            print(f"问题 {item.question_id}: {item.answer}")
+
