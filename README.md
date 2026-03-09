@@ -46,332 +46,69 @@ Solve the custom dataset gradient not match.
 
 # References
 ```python
+import torch
+import psutil
 import os
-from typing import TypedDict, Annotated
-from pydantic import Field
-from langchain_core.tools import tool
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
-from langgraph.graph import StateGraph, END
-from langgraph.graph.message import add_messages
-from langgraph.prebuilt import ToolNode, tools_condition
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
-# ==========================================
-# 0. 环境准备
-# ==========================================
-# 请确保设置了你的 OpenAI API Key。
-# 如果你使用的是其他兼容 OpenAI 接口的模型（如 DeepSeek, Qwen），请修改 base_url 和模型名称。
-os.environ["OPENAI_API_KEY"] = "your-openai-api-key-here" 
-
-# ==========================================
-# 1. 定义动作工具 (Tools)
-# ==========================================
-@tool
-def call_phone(target_role: str = Field(description="The role or person to call, e.g., 'admin', 'police'"), 
-               reason: str = Field(description="The reason for calling")):
-    """Use this tool to make a phone call to a specific role."""
-    print(f"\n📞 [Tool Executed] Calling {target_role}... Reason: {reason}")
-    return f"Successfully called {target_role}"
-
-@tool
-def send_sms(target_role: str = Field(description="The role or person to text, e.g., 'car owner'"), 
-             message: str = Field(description="The text message content")):
-    """Use this tool to send an SMS text message."""
-    print(f"\n✉️ [Tool Executed] Sending SMS to {target_role}... Message: {message}")
-    return f"SMS sent to {target_role}"
-
-@tool
-def trigger_alarm(floor: int = Field(description="The floor number to trigger the alarm on"), 
-                  alarm_type: str = Field(description="Type of alarm, e.g., 'fire', 'intruder'")):
-    """Use this tool to sound the physical building alarm."""
-    print(f"\n🚨 [Tool Executed] Triggering {alarm_type} alarm on floor {floor}!")
-    return f"Alarm triggered on floor {floor}"
-
-# 将所有可用工具打包
-action_tools = [call_phone, send_sms, trigger_alarm]
-
-# ==========================================
-# 2. 定义图状态 (State)
-# ==========================================
-class InspectionState(TypedDict):
-    floor: int
-    condition: str             # 触发条件 (例如: "detect human presence")
-    action_rule: str           # 触发后的动作规则 (例如: "call the floor administrator")
-    camera_data: str           # 模拟的摄像头文字描述（真实场景中可以是图片的 Base64）
-    should_alert: bool         # 内部状态：是否需要报警
-    messages: Annotated[list, add_messages] # 用于存储 Agent 和 Tool 之间的对话历史
-
-# ==========================================
-# 3. 定义图的节点 (Nodes)
-# ==========================================
-def analyze_node(state: InspectionState):
-    """
-    节点 1：负责“看”。根据传入的 condition 判断当前画面是否异常。
-    """
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+def print_memory_usage(stage="当前状态"):
+    """打印当前进程的 RAM 和 GPU 显存占用"""
+    # 1. 获取系统内存 (RAM) 占用
+    process = psutil.Process(os.getpid())
+    ram_mb = process.memory_info().rss / (1024 ** 2)
     
-    # 纯英文 Prompt，保证逻辑严密性
-    sys_prompt = f"""You are an advanced security visual analysis agent.
-Your task is to observe the provided surveillance data and determine if it triggers a specific condition.
-
-[Trigger Condition]: {state['condition']}
-
-Rules:
-1. Carefully compare the visual data against the [Trigger Condition].
-2. If the visual data STRICTLY MATCHES the condition, reply with exactly "YES".
-3. If it does not match, or the scene is normal, reply with exactly "NO".
-4. Do not output any additional explanation, formatting, or punctuation."""
-
-    messages = [
-        SystemMessage(content=sys_prompt),
-        HumanMessage(content=f"Surveillance Data: {state['camera_data']}")
-    ]
-    
-    response = llm.invoke(messages).content.strip().upper()
-    should_alert = "YES" in response
-    
-    print(f"👀 [Analyze Node] Floor: {state['floor']} | Condition: '{state['condition']}'")
-    print(f"   -> Model Judgment: {response} | Trigger Alert: {should_alert}")
-    
-    return {"should_alert": should_alert}
-
-
-def action_agent_node(state: InspectionState):
-    """
-    节点 2：负责“决策”。当发现异常时，根据 action_rule 选择合适的工具并生成调用参数。
-    """
-    llm_with_tools = ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(action_tools)
-    
-    sys_prompt = f"""You are a security action execution agent.
-An anomaly has just been confirmed on floor {state['floor']}. 
-The detected situation matches the condition: {state['condition']}.
-
-[Required Action Rule]: {state['action_rule']}
-
-Your task:
-Based on the [Required Action Rule], select the most appropriate tool to execute the action.
-Extract the necessary parameters (like target role, reason, or message) from the context.
-Execute the tool immediately. Do not ask for user confirmation."""
-
-    messages = [SystemMessage(content=sys_prompt)]
-    
-    print(f"🧠 [Action Agent] Deciding action based on rule: '{state['action_rule']}'...")
-    response = llm_with_tools.invoke(messages)
-    
-    return {"messages": [response]}
-
-
-def alert_router(state: InspectionState):
-    """
-    条件路由：根据 analyze_node 的结果决定去向。
-    """
-    if state.get("should_alert"):
-        return "action_agent"
-    return END
-
-# ==========================================
-# 4. 组装 LangGraph 工作流
-# ==========================================
-workflow = StateGraph(InspectionState)
-
-# 添加节点
-workflow.add_node("analyze", analyze_node)
-workflow.add_node("action_agent", action_agent_node)
-# ToolNode 是 LangGraph 内置的专门用于执行大模型输出的工具调用的节点
-workflow.add_node("execute_tools", ToolNode(action_tools)) 
-
-# 设置起点
-workflow.set_entry_point("analyze")
-
-# 设置边与路由
-# 1. 分析完后，判断是否需要动作
-workflow.add_conditional_edges(
-    "analyze", 
-    alert_router, 
-    {"action_agent": "action_agent", END: END}
-)
-
-# 2. 动作决策完后，执行工具 (tools_condition 会检查 LLM 是否真的请求了工具)
-workflow.add_conditional_edges(
-    "action_agent", 
-    tools_condition, 
-    {"tools": "execute_tools", END: END}
-)
-
-# 3. 工具执行完毕后，流程结束
-workflow.add_edge("execute_tools", END)
-
-# 编译图
-app = workflow.compile()
-
-# ==========================================
-# 5. 测试用例运行
-# ==========================================
-if __name__ == "__main__":
-    print("==================================================")
-    print("TEST CASE 1: 发现可疑人员，触发拨打电话 (Should Call)")
-    print("==================================================")
-    state_1 = {
-        "floor": 6,
-        "condition": "detect human presence",
-        "action_rule": "call the floor administrator",
-        "camera_data": "A person in a black hoodie is walking down the hallway.",
-        "messages": []
-    }
-    app.invoke(state_1)
-    
-    print("\n==================================================")
-    print("TEST CASE 2: 发现违停，触发发送短信 (Should SMS)")
-    print("==================================================")
-    state_2 = {
-        "floor": -1,
-        "condition": "detect a car parked outside of the designated parking lines",
-        "action_rule": "send an SMS to the car owner asking them to move the car",
-        "camera_data": "A red sedan is parked blocking the fire exit.",
-        "messages": []
-    }
-    app.invoke(state_2)
-
-    print("\n==================================================")
-    print("TEST CASE 3: 画面正常，不触发任何动作 (Should Ignore)")
-    print("==================================================")
-    state_3 = {
-        "floor": 3,
-        "condition": "detect fire or smoke",
-        "action_rule": "trigger the fire alarm",
-        "camera_data": "The server room is dark and quiet, all indicator lights are normal.",
-        "messages": []
-    }
-    app.invoke(state_3)
-import os
-import cv2
-import base64
-from typing import TypedDict, List, Literal
-from pydantic import BaseModel, Field
-from langgraph.graph import StateGraph, START, END
-from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-
-
-class AnswerItem(BaseModel):
-    question_id: int = Field(description="问题的序号，从 1 开始")
-    answer: Literal["yes", "no"] = Field(description="该问题的答案，只能是 yes 或 no")
-
-class VideoQAResponse(BaseModel):
-    results: list[AnswerItem] = Field(description="视频问答结果的列表")
-
-
-class GraphState(TypedDict):
-    video_path: str             # 本地视频文件的路径
-    questions: List[str]        # 提出的问题列表
-    final_result: VideoQAResponse
-
-
-def extract_frames_as_base64(video_path: str, interval_sec: int = 1, max_frames: int = 30) -> list[str]:
-    """
-    使用 OpenCV 读取视频，每隔 interval_sec 秒抽取一帧，并转换为 base64 字符串。
-    max_frames 用于保护 API 调用，避免传入超长视频导致显存溢出或费用过高。
-    """
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise ValueError(f"无法打开视频文件: {video_path}")
-    
-    fps = round(cap.get(cv2.CAP_PROP_FPS))
-    if fps == 0:
-        fps = 30 
+    # 2. 获取显存 (VRAM) 占用
+    if torch.cuda.is_available():
+        # 当前分配的显存
+        vram_mb = torch.cuda.memory_allocated() / (1024 ** 2)
+        # 历史峰值显存（非常重要，因为推理时会产生临时显存峰值）
+        vram_max_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
         
-    frame_interval = int(fps * interval_sec) 
-    
-    base64_frames = []
-    frame_count = 0
-    
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break 
-            
-        if frame_count % frame_interval == 0:
-            _, buffer = cv2.imencode('.jpg', frame)
-            b64_str = base64.b64encode(buffer).decode('utf-8')
-            base64_frames.append(b64_str)
-            
-            if len(base64_frames) >= max_frames:
-                print(f"[警告] 达到最大限制 {max_frames} 帧，已停止继续抽帧。")
-                break
-                
-        frame_count += 1
-        
-    cap.release()
-    print(f"[信息] 抽帧完成，共提取 {len(base64_frames)} 帧图片。")
-    return base64_frames
-
-def analyze_video_node(state: GraphState):
-
-    llm = ChatOpenAI(
-        temperature=0.1
-    )
-    
-    structured_llm = llm.with_structured_output(VideoQAResponse)
-
-
-    print(f"[处理中] 正在从 {state['video_path']} 提取视频帧...")
-    base64_frames = extract_frames_as_base64(state["video_path"], interval_sec=1)
-    
-
-    questions_text = "\n".join([
-        f"{i+1}. {q}" for i, q in enumerate(state["questions"])
-    ])
-
-
-    user_content = [
-        {
-            "type": "text", 
-            "text": f"这是一段视频按1秒1帧提取的连续画面。请仔细观察这些画面，并严格按照 JSON 格式以 yes 或 no 回答以下问题：\n\n{questions_text}"
-        }
-    ]
-
-    for b64_str in base64_frames:
-        user_content.append({
-            "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{b64_str}"}
-        })
-
-    messages = [
-        SystemMessage(content="你是一个精准的多模态视频分析引擎。必须严格按照提供的 JSON Schema 输出结果，不要输出任何多余的解释。"),
-        HumanMessage(content=user_content)
-    ]
-    
-    print("[处理中] 正在调用 Qwen-VL 进行推理 (这可能需要十几秒)...")
-    response = structured_llm.invoke(messages)
-    
-    return {"final_result": response}
-
-workflow = StateGraph(GraphState)
-workflow.add_node("analyze_node", analyze_video_node)
-workflow.add_edge(START, "analyze_node")
-workflow.add_edge("analyze_node", END)
-app = workflow.compile()
-
-if __name__ == "__main__":
-    test_video_path = "1.mp4" 
-    
-    if not os.path.exists(test_video_path):
-        print(f"找不到测试视频: {test_video_path}，请放入一个视频文件后重试。")
+        print(f"[{stage}]")
+        print(f" ├─ 系统内存 (RAM): {ram_mb:.2f} MB")
+        print(f" ├─ GPU 显存 (VRAM): {vram_mb:.2f} MB")
+        print(f" └─ 显存峰值 (Max VRAM): {vram_max_mb:.2f} MB\n")
     else:
-        inputs = {
-            "video_path": test_video_path,
-            "questions": [
-                "视频中是否出现了人类？",
-                "视频的场景是在室外吗？",
-                "视频中是否出现了汽车？",
-                "画面中有人在跑步吗？"
-            ]
-        }
+        print(f"[{stage}]\n └─ 系统内存 (RAM): {ram_mb:.2f} MB (未检测到可用的 GPU)\n")
 
-        result_state = app.invoke(inputs)
-        final_answers = result_state["final_result"]
-        
-        print("\n=== ✨ 最终分析结果 ===")
-        for item in final_answers.results:
-            print(f"问题 {item.question_id}: {item.answer}")
+# ================= 测试开始 =================
 
+print_memory_usage("1. 初始化/加载模型前")
+
+# 替换为实际的 Qwen3 2B 模型路径或 Hugging Face ID
+model_id = "Qwen/Qwen3-2B-Instruct"  # 示例名称，请根据实际情况修改
+
+# 加载 Tokenizer
+tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+
+# 加载模型 (建议使用 float16 或 bfloat16 以节省一半显存)
+model = AutoModelForCausalLM.from_pretrained(
+    model_id,
+    device_map="auto",       # 自动将模型加载到可用的 GPU 上
+    torch_dtype=torch.float16, # 使用半精度
+    trust_remote_code=True
+)
+
+print_memory_usage("2. 模型加载完成 (静态显存)")
+
+# 准备测试数据并进行推理
+text = "你好，请详细介绍一下量子计算的基本原理。"
+inputs = tokenizer(text, return_tensors="pt").to(model.device)
+
+# 生成回复
+with torch.no_grad(): # 推理时务必关闭梯度计算，否则会爆显存
+    outputs = model.generate(
+        **inputs, 
+        max_new_tokens=256,
+        do_sample=True,
+        temperature=0.7
+    )
+
+print_memory_usage("3. 推理生成完成 (包含 KV Cache 显存)")
+
+# （可选）清理显存缓存
+# del model
+# del inputs
+# del outputs
+# torch.cuda.empty_cache()
+# print_memory_usage("4. 清理缓存后")
