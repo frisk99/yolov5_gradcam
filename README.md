@@ -49,66 +49,93 @@ Solve the custom dataset gradient not match.
 import torch
 import psutil
 import os
-from transformers import AutoModelForCausalLM, AutoTokenizer
+import glob
+from PIL import Image
+from transformers import AutoProcessor, AutoModelForVision2Seq
 
 def print_memory_usage(stage="当前状态"):
     """打印当前进程的 RAM 和 GPU 显存占用"""
-    # 1. 获取系统内存 (RAM) 占用
     process = psutil.Process(os.getpid())
     ram_mb = process.memory_info().rss / (1024 ** 2)
     
-    # 2. 获取显存 (VRAM) 占用
     if torch.cuda.is_available():
-        # 当前分配的显存
         vram_mb = torch.cuda.memory_allocated() / (1024 ** 2)
-        # 历史峰值显存（非常重要，因为推理时会产生临时显存峰值）
         vram_max_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
-        
         print(f"[{stage}]")
         print(f" ├─ 系统内存 (RAM): {ram_mb:.2f} MB")
         print(f" ├─ GPU 显存 (VRAM): {vram_mb:.2f} MB")
         print(f" └─ 显存峰值 (Max VRAM): {vram_max_mb:.2f} MB\n")
     else:
-        print(f"[{stage}]\n └─ 系统内存 (RAM): {ram_mb:.2f} MB (未检测到可用的 GPU)\n")
+        print(f"[{stage}]\n └─ 系统内存 (RAM): {ram_mb:.2f} MB (未检测到 GPU)\n")
 
 # ================= 测试开始 =================
 
 print_memory_usage("1. 初始化/加载模型前")
 
-# 替换为实际的 Qwen3 2B 模型路径或 Hugging Face ID
-model_id = "Qwen/Qwen3-2B-Instruct"  # 示例名称，请根据实际情况修改
+# 注意：这里必须使用 Qwen 的 VL (视觉) 版本，例如 Qwen2-VL-2B-Instruct
+model_id = "Qwen/Qwen2-VL-2B-Instruct" 
 
-# 加载 Tokenizer
-tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+# 视觉模型需要 Processor 来同时处理文本和图片
+processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
-# 加载模型 (建议使用 float16 或 bfloat16 以节省一半显存)
-model = AutoModelForCausalLM.from_pretrained(
+# 加载视觉语言模型
+model = AutoModelForVision2Seq.from_pretrained(
     model_id,
-    device_map="auto",       # 自动将模型加载到可用的 GPU 上
-    torch_dtype=torch.float16, # 使用半精度
+    device_map="auto",
+    torch_dtype=torch.float16,
     trust_remote_code=True
 )
 
 print_memory_usage("2. 模型加载完成 (静态显存)")
 
-# 准备测试数据并进行推理
-text = "你好，请详细介绍一下量子计算的基本原理。"
-inputs = tokenizer(text, return_tensors="pt").to(model.device)
+# ================= 遍历文件夹 =================
 
-# 生成回复
-with torch.no_grad(): # 推理时务必关闭梯度计算，否则会爆显存
-    outputs = model.generate(
-        **inputs, 
-        max_new_tokens=256,
-        do_sample=True,
-        temperature=0.7
-    )
+# 替换为你存放图片的实际文件夹路径
+image_folder = "./my_images" 
+# 匹配常见的图片格式
+image_paths = glob.glob(os.path.join(image_folder, "*.[jp][pn]*g")) # 匹配 jpg, jpeg, png
 
-print_memory_usage("3. 推理生成完成 (包含 KV Cache 显存)")
+if not image_paths:
+    print(f"在 {image_folder} 下没有找到图片文件。")
+else:
+    print(f"找到 {len(image_paths)} 张图片，开始逐一处理...\n")
 
-# （可选）清理显存缓存
-# del model
-# del inputs
-# del outputs
-# torch.cuda.empty_cache()
-# print_memory_usage("4. 清理缓存后")
+    for idx, img_path in enumerate(image_paths):
+        print(f"--- 正在处理第 {idx+1} 张图片: {os.path.basename(img_path)} ---")
+        
+        # 读取图片
+        image = Image.open(img_path).convert("RGB")
+        
+        # 构建符合 Qwen-VL 格式的对话输入
+        messages = [
+            {"role": "user", "content": [
+                {"type": "image", "image": image},
+                {"type": "text", "text": "请详细描述这张图片的内容。"}
+            ]}
+        ]
+        
+        # 使用 Processor 将图片和文本转换为模型输入张量
+        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+        inputs = processor(text=[text], images=[image], padding=True, return_tensors="pt").to(model.device)
+        
+        print_memory_usage(f"3. 准备好输入张量 (图片 {idx+1})")
+        
+        # 推理生成
+        with torch.no_grad():
+            generated_ids = model.generate(**inputs, max_new_tokens=128)
+            # 截断 input_ids 部分，只保留生成的回复
+            generated_ids_trimmed = [
+                out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+            ]
+            response = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+            
+        print(f"🤖 模型描述: {response}\n")
+        print_memory_usage(f"4. 推理生成完成 (图片 {idx+1})")
+        
+        # [关键步骤] 清理单次循环产生的缓存，防止处理多张图片时显存不断叠加导致 OOM
+        del inputs
+        del generated_ids
+        del generated_ids_trimmed
+        torch.cuda.empty_cache()
+
+print("所有图片处理完毕！")
