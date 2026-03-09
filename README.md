@@ -63,22 +63,18 @@ def print_memory_usage(stage="当前状态"):
         vram_max_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
         print(f"[{stage}]")
         print(f" ├─ 系统内存 (RAM): {ram_mb:.2f} MB")
-        print(f" ├─ GPU 显存 (VRAM): {vram_mb:.2f} MB")
-        print(f" └─ 显存峰值 (Max VRAM): {vram_max_mb:.2f} MB\n")
+        print(f" ├─ GPU 当前显存 (VRAM): {vram_mb:.2f} MB")
+        print(f" └─ GPU 显存峰值 (Max VRAM): {vram_max_mb:.2f} MB\n")
     else:
         print(f"[{stage}]\n └─ 系统内存 (RAM): {ram_mb:.2f} MB (未检测到 GPU)\n")
 
-# ================= 测试开始 =================
+# ================= 1. 初始化模型 =================
 
 print_memory_usage("1. 初始化/加载模型前")
 
-# 注意：这里必须使用 Qwen 的 VL (视觉) 版本，例如 Qwen2-VL-2B-Instruct
 model_id = "Qwen/Qwen2-VL-2B-Instruct" 
-
-# 视觉模型需要 Processor 来同时处理文本和图片
 processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
-# 加载视觉语言模型
 model = AutoModelForVision2Seq.from_pretrained(
     model_id,
     device_map="auto",
@@ -88,54 +84,62 @@ model = AutoModelForVision2Seq.from_pretrained(
 
 print_memory_usage("2. 模型加载完成 (静态显存)")
 
-# ================= 遍历文件夹 =================
+# ================= 2. 读取所有图片 =================
 
-# 替换为你存放图片的实际文件夹路径
-image_folder = "./my_images" 
-# 匹配常见的图片格式
-image_paths = glob.glob(os.path.join(image_folder, "*.[jp][pn]*g")) # 匹配 jpg, jpeg, png
+image_folder = "./my_images"  # 替换为你的文件夹路径
+image_paths = glob.glob(os.path.join(image_folder, "*.[jp][pn]*g"))
 
 if not image_paths:
     print(f"在 {image_folder} 下没有找到图片文件。")
-else:
-    print(f"找到 {len(image_paths)} 张图片，开始逐一处理...\n")
+    exit()
 
-    for idx, img_path in enumerate(image_paths):
-        print(f"--- 正在处理第 {idx+1} 张图片: {os.path.basename(img_path)} ---")
-        
-        # 读取图片
-        image = Image.open(img_path).convert("RGB")
-        
-        # 构建符合 Qwen-VL 格式的对话输入
-        messages = [
-            {"role": "user", "content": [
-                {"type": "image", "image": image},
-                {"type": "text", "text": "请详细描述这张图片的内容。"}
-            ]}
-        ]
-        
-        # 使用 Processor 将图片和文本转换为模型输入张量
-        text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = processor(text=[text], images=[image], padding=True, return_tensors="pt").to(model.device)
-        
-        print_memory_usage(f"3. 准备好输入张量 (图片 {idx+1})")
-        
-        # 推理生成
-        with torch.no_grad():
-            generated_ids = model.generate(**inputs, max_new_tokens=128)
-            # 截断 input_ids 部分，只保留生成的回复
-            generated_ids_trimmed = [
-                out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
-            ]
-            response = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
-            
-        print(f"🤖 模型描述: {response}\n")
-        print_memory_usage(f"4. 推理生成完成 (图片 {idx+1})")
-        
-        # [关键步骤] 清理单次循环产生的缓存，防止处理多张图片时显存不断叠加导致 OOM
-        del inputs
-        del generated_ids
-        del generated_ids_trimmed
-        torch.cuda.empty_cache()
+print(f"找到 {len(image_paths)} 张图片，正在准备一次性输入...")
 
-print("所有图片处理完毕！")
+# 加载所有图片对象
+images = [Image.open(img_path).convert("RGB") for img_path in image_paths]
+
+# 构建 content 列表：包含所有的图片，以及最后的一个文本提问
+content_list = [{"type": "image", "image": img} for img in images]
+content_list.append({"type": "text", "text": "请结合以上所有图片，总结它们共同的主题，并分别简述每张图片的内容。"})
+
+messages = [
+    {
+        "role": "user", 
+        "content": content_list
+    }
+]
+
+# ================= 3. 处理输入与推理 =================
+
+# 重置显存峰值统计，以便单独测量本次多图推理的峰值
+if torch.cuda.is_available():
+    torch.cuda.reset_peak_memory_stats()
+
+# 预处理输入
+text = processor.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+# 将所有图片传给 processor
+inputs = processor(text=[text], images=images, padding=True, return_tensors="pt").to(model.device)
+
+print_memory_usage("3. 准备好包含所有图片的输入张量")
+
+# 推理生成
+with torch.no_grad():
+    print("正在进行多图推理，请耐心等待...")
+    generated_ids = model.generate(**inputs, max_new_tokens=256)
+    
+    # 截取新生成的内容
+    generated_ids_trimmed = [
+        out_ids[len(in_ids):] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)
+    ]
+    response = processor.batch_decode(generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
+
+print(f"🤖 模型回复:\n{response}\n")
+
+print_memory_usage("4. 推理完成 (查看此时的显存峰值)")
+
+# ================= 4. 清理 =================
+del inputs
+del generated_ids
+del generated_ids_trimmed
+torch.cuda.empty_cache()
+print_memory_usage("5. 清除张量缓存后")
