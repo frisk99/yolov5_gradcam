@@ -46,28 +46,20 @@ Solve the custom dataset gradient not match.
 
 # References
 ```python
-# 开启 Chat Completions HTTP 接口
-openclaw config set gateway.http.endpoints.chatCompletions.enabled true
-
-# 重启 Gateway 让配置生效
-openclaw gateway restart
-
 import requests
 
-# 替换为你的 OpenClaw Gateway 实际运行的地址和端口
-url = "http://127.0.0.1:18789/api/agent/run" 
-
-headers = {
-    "Content-Type": "application/json",
-    # 如果你的 OpenClaw 配置了鉴权，需要带上 Gateway Token (在 ~/.openclaw/openclaw.json 中)
-    # "Authorization": "Bearer YOUR_GATEWAY_TOKEN" 
-}
-
+url = "http://127.0.0.1:18789/v1/chat/completions" 
+headers = {"Content-Type": "application/json"}
 payload = {
-    "message": "这是一次自动化数据特征提取任务，请直接输出结果。",
-    # 你可以强制它不使用某个持续的聊天 Session，作为一个独立任务运行
-    "session": "standalone_task" 
+    "model": "openclaw:main", 
+    "messages": [{"role": "user", "content": "测试请求"}]
 }
 
-response = requests.post(url, json=payload, headers=headers)
+# 强行设置 proxies 为 None，避免本地网络请求被 7890 等代理端口劫持
+proxies = {
+    "http": None,
+    "https": None
+}
+
+response = requests.post(url, json=payload, headers=headers, proxies=proxies)
 print(response.json())
