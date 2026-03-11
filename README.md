@@ -46,40 +46,22 @@ Solve the custom dataset gradient not match.
 
 # References
 ```python
-import torch
-import psutil
-import os
+import requests
 
-def print_memory_usage(stage="当前状态"):
-    """打印当前进程的 RAM 和 GPU 显存占用，包含各自的峰值"""
-    process = psutil.Process(os.getpid())
-    mem_info = process.memory_info()
-    
-    # 1. 获取当前系统内存 (RAM)
-    ram_mb = mem_info.rss / (1024 ** 2)
-    
-    # 2. 获取系统内存峰值 (Max RAM)
-    # 根据不同操作系统获取不同的底层属性
-    if hasattr(mem_info, 'peak_wset'):
-        # Windows 系统
-        max_ram_mb = mem_info.peak_wset / (1024 ** 2)
-    elif hasattr(mem_info, 'hwm'):
-        # Linux 系统
-        max_ram_mb = mem_info.hwm / (1024 ** 2)
-    else:
-        # macOS 或其他不支持直接获取峰值的系统 (Fallback fallback为当前值)
-        max_ram_mb = ram_mb 
-        
-    print(f"[{stage}]")
-    print(f" ├─ 系统内存 (RAM): {ram_mb:.2f} MB")
-    print(f" ├─ 内存峰值 (Max RAM): {max_ram_mb:.2f} MB")
-    
-    # 3. 获取 GPU 显存 (VRAM)
-    if torch.cuda.is_available():
-        vram_mb = torch.cuda.memory_allocated() / (1024 ** 2)
-        vram_max_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
-        
-        print(f" ├─ GPU 显存 (VRAM): {vram_mb:.2f} MB")
-        print(f" └─ 显存峰值 (Max VRAM): {vram_max_mb:.2f} MB\n")
-    else:
-        print(f" └─ (未检测到可用的 GPU)\n")
+# 替换为你的 OpenClaw Gateway 实际运行的地址和端口
+url = "http://127.0.0.1:18789/api/agent/run" 
+
+headers = {
+    "Content-Type": "application/json",
+    # 如果你的 OpenClaw 配置了鉴权，需要带上 Gateway Token (在 ~/.openclaw/openclaw.json 中)
+    # "Authorization": "Bearer YOUR_GATEWAY_TOKEN" 
+}
+
+payload = {
+    "message": "这是一次自动化数据特征提取任务，请直接输出结果。",
+    # 你可以强制它不使用某个持续的聊天 Session，作为一个独立任务运行
+    "session": "standalone_task" 
+}
+
+response = requests.post(url, json=payload, headers=headers)
+print(response.json())
