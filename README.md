@@ -46,6 +46,12 @@ Solve the custom dataset gradient not match.
 
 # References
 ```python
+# 开启 Chat Completions HTTP 接口
+openclaw config set gateway.http.endpoints.chatCompletions.enabled true
+
+# 重启 Gateway 让配置生效
+openclaw gateway restart
+
 import requests
 
 # 替换为你的 OpenClaw Gateway 实际运行的地址和端口
