@@ -45,21 +45,3 @@ This problem is solved in version 6.1
 Solve the custom dataset gradient not match.
 
 # References
-```python
-import requests
-
-url = "http://127.0.0.1:18789/v1/chat/completions" 
-headers = {"Content-Type": "application/json"}
-payload = {
-    "model": "openclaw:main", 
-    "messages": [{"role": "user", "content": "测试请求"}]
-}
-
-# 强行设置 proxies 为 None，避免本地网络请求被 7890 等代理端口劫持
-proxies = {
-    "http": None,
-    "https": None
-}
-
-response = requests.post(url, json=payload, headers=headers, proxies=proxies)
-print(response.json())
