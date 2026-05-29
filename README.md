@@ -46,4 +46,62 @@ Solve the custom dataset gradient not match.
 
 # References
 ```python
-%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#ffffff', 'primaryBorderColor': '#000000', 'primaryTextColor': '#000000', 'lineColor': '#000000', 'fontFamily': 'monospace'}}}%%
+import time
+import mujoco
+import mujoco.viewer
+
+# 1. 加载你现成的 XML 文件 (请替换为你的实际文件路径)
+xml_path = "your_model.xml"  
+model = mujoco.MjModel.from_xml_path(xml_path)
+data = mujoco.MjData(model)
+
+# ==========================================
+# 2. 修改特定 joint 的初始位置 (精确赋值)
+# ==========================================
+joint_name = "你的关节名称"  # 请替换为 XML 中的 joint name
+target_value = 1.57         # 请填入你想要的精确数值 (旋转关节为弧度，平移关节为米)
+
+try:
+    # 获取关节 ID 和它在 qpos 数组中的地址
+    joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+    qpos_addr = model.jnt_qposadr[joint_id]
+    
+    # 赋精确数值
+    data.qpos[qpos_addr] = target_value
+    
+    # 如果你有多个关节要改，直接复制上面两行并替换名字和数值即可，例如：
+    # joint_id_2 = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "joint_2")
+    # data.qpos[model.jnt_qposadr[joint_id_2]] = 0.5
+
+except KeyError:
+    print(f"⚠️ 找不到名为 '{joint_name}' 的关节，请检查你的 XML 文件拼写！")
+
+# 3. 同步内部状态，让修改生效 (非常重要)
+mujoco.mj_forward(model, data)
+
+# ==========================================
+# 4. 启动 Viewer 进行查看
+# ==========================================
+with mujoco.viewer.launch_passive(model, data) as viewer:
+    
+    # 【可选小技巧】如果你只是想静静地查看修改后的初始姿态，
+    # 不希望一打开窗口模型就被重力拉倒，可以取消下面这行注释来默认暂停物理引擎：
+    # viewer.lock()
+    # viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_PAUSE] = True
+    # viewer.unlock()
+
+    print("Viewer 已启动。按空格键可以暂停/恢复物理仿真。")
+
+    while viewer.is_running():
+        step_start = time.time()
+        
+        # 步进物理引擎
+        mujoco.mj_step(model, data)
+        
+        # 同步画面
+        viewer.sync()
+
+        # 保持实时速度
+        time_until_next_step = model.opt.timestep - (time.time() - step_start)
+        if time_until_next_step > 0:
+            time.sleep(time_until_next_step)
