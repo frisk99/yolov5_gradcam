@@ -46,62 +46,82 @@ Solve the custom dataset gradient not match.
 
 # References
 ```python
-import time
-import mujoco
-import mujoco.viewer
+import os
+import argparse
+import numpy as np
 
-# 1. 加载你现成的 XML 文件 (请替换为你的实际文件路径)
-xml_path = "your_model.xml"  
-model = mujoco.MjModel.from_xml_path(xml_path)
-data = mujoco.MjData(model)
+from aitviewer.renderables.smpl import SMPLSequence
+from aitviewer.headless import HeadlessRenderer
+from aitviewer.viewer import Viewer
 
-# ==========================================
-# 2. 修改特定 joint 的初始位置 (精确赋值)
-# ==========================================
-joint_name = "你的关节名称"  # 请替换为 XML 中的 joint name
-target_value = 1.57         # 请填入你想要的精确数值 (旋转关节为弧度，平移关节为米)
 
-try:
-    # 获取关节 ID 和它在 qpos 数组中的地址
-    joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
-    qpos_addr = model.jnt_qposadr[joint_id]
-    
-    # 赋精确数值
-    data.qpos[qpos_addr] = target_value
-    
-    # 如果你有多个关节要改，直接复制上面两行并替换名字和数值即可，例如：
-    # joint_id_2 = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "joint_2")
-    # data.qpos[model.jnt_qposadr[joint_id_2]] = 0.5
+def preview_amass(npz_path, fps, width, height, show_joint_angles):
+    seq = SMPLSequence.from_amass(
+        npz_data_path=npz_path,
+        fps_out=fps,
+        name=os.path.basename(npz_path),
+        show_joint_angles=show_joint_angles,
+    )
 
-except KeyError:
-    print(f"⚠️ 找不到名为 '{joint_name}' 的关节，请检查你的 XML 文件拼写！")
+    v = Viewer(size=(width, height))
+    v.run_animations = True
+    v.scene.camera.position = np.array([10.0, 2.5, 0.0])
+    v.scene.add(seq)
+    v.run()
 
-# 3. 同步内部状态，让修改生效 (非常重要)
-mujoco.mj_forward(model, data)
 
-# ==========================================
-# 4. 启动 Viewer 进行查看
-# ==========================================
-with mujoco.viewer.launch_passive(model, data) as viewer:
-    
-    # 【可选小技巧】如果你只是想静静地查看修改后的初始姿态，
-    # 不希望一打开窗口模型就被重力拉倒，可以取消下面这行注释来默认暂停物理引擎：
-    # viewer.lock()
-    # viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_PAUSE] = True
-    # viewer.unlock()
+def export_amass_to_mp4(npz_path, out_path, fps, width, height, show_joint_angles):
+    seq = SMPLSequence.from_amass(
+        npz_data_path=npz_path,
+        fps_out=fps,
+        name=os.path.basename(npz_path),
+        show_joint_angles=show_joint_angles,
+    )
 
-    print("Viewer 已启动。按空格键可以暂停/恢复物理仿真。")
+    # 可选：让人体稍微透明一点
+    seq.color = seq.color[:3] + (0.8,)
 
-    while viewer.is_running():
-        step_start = time.time()
-        
-        # 步进物理引擎
-        mujoco.mj_step(model, data)
-        
-        # 同步画面
-        viewer.sync()
+    renderer = HeadlessRenderer(size=(width, height))
+    renderer.scene.add(seq)
 
-        # 保持实时速度
-        time_until_next_step = model.opt.timestep - (time.time() - step_start)
-        if time_until_next_step > 0:
-            time.sleep(time_until_next_step)
+    # 让相机自动跟随人物，官方示例也是这么做的
+    renderer.lock_to_node(seq, (2, 2, 2), smooth_sigma=5.0)
+
+    # 注意：虽然参数名叫 video_dir，但这里传的是完整 mp4 文件路径
+    renderer.save_video(video_dir=out_path)
+
+    print(f"Saved video to: {out_path}")
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--npz", type=str, required=True, help="AMASS .npz path")
+    parser.add_argument("--out", type=str, default="output.mp4", help="output mp4 path")
+    parser.add_argument("--fps", type=float, default=60.0, help="output fps")
+    parser.add_argument("--width", type=int, default=1280)
+    parser.add_argument("--height", type=int, default=720)
+    parser.add_argument("--show-joints", action="store_true", help="show joint coordinate systems")
+    parser.add_argument("--preview", action="store_true", help="preview only, do not export")
+    args = parser.parse_args()
+
+    if args.preview:
+        preview_amass(
+            npz_path=args.npz,
+            fps=args.fps,
+            width=args.width,
+            height=args.height,
+            show_joint_angles=args.show_joints,
+        )
+    else:
+        export_amass_to_mp4(
+            npz_path=args.npz,
+            out_path=args.out,
+            fps=args.fps,
+            width=args.width,
+            height=args.height,
+            show_joint_angles=args.show_joints,
+        )
+
+
+if __name__ == "__main__":
+    main()
