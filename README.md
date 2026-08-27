@@ -45,5 +45,4 @@ This problem is solved in version 6.1
 Solve the custom dataset gradient not match.
 
 # References
-https://drive.google.com/file/d/1hcHnLJ8m9AYf35XIJOFVW7w6V7aVTul-/view?usp=drivesdk
-https://drive.google.com/file/d/10z9tjTThujRnEHLpKhxUW3_Fqpj8fdyf/view?usp=drivesdk
+https://drive.google.com/file/d/1PpIjAHH3NfyZX88tQVgLnppSv3JaVGgb/view?usp=drivesdk
