@@ -46,3 +46,40 @@ Solve the custom dataset gradient not match.
 
 # References
 https://drive.google.com/file/d/1PpIjAHH3NfyZX88tQVgLnppSv3JaVGgb/view?usp=drivesdk
+
+flowchart TD
+    subgraph S1["第一阶段：从 CAD 得到导航地图"]
+        A["CAD / BIM 建筑模型"] --> B["导入或转换为 USD"]
+        B --> C["校验比例、坐标和碰撞几何"]
+        U["你已有的大楼 USD"] --> C
+        C --> D["按楼层设置高度范围和栅格分辨率"]
+        D --> E["Occupancy Map Generator"]
+        E --> F["导出 PNG + YAML 静态占据地图"]
+    end
+
+    subgraph S2["第二阶段：在仿真中跑通导航"]
+        F --> G["Map Server 加载并发布地图"]
+        R["机器人模型、模拟传感器和底盘控制"] --> H["AMCL 定位 + Nav2 导航"]
+        G --> H
+        H --> I["验证定位、路径规划、避障和运动"]
+    end
+
+    subgraph S3["第三阶段：接入真实机器人"]
+        I --> J["接入真实雷达、里程计、TF 和底盘驱动"]
+        J --> K["现场扫描与地图对齐，完成标定"]
+        K --> L{"能否稳定定位？"}
+        L -- "不能" --> M["检查地图差异、尺度、外参和里程计"]
+        M --> K
+        L -- "能" --> N["按实机尺寸和运动能力调整导航参数"]
+        N --> O["实测窄门、转弯、动态障碍和定位恢复"]
+        O --> P{"巡航验收通过？"}
+        P -- "未通过" --> N
+        P -- "通过" --> Q["实际巡航运行"]
+    end
+
+    subgraph S4["第四阶段：运行中的环境维护"]
+        Q --> V["临时变化：实时更新障碍层"]
+        Q --> W["长期变化：修改地图或进行 SLAM 续建"]
+        W --> X["验证并发布新版地图"]
+        X --> K
+    end
